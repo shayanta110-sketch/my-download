@@ -13,11 +13,15 @@ jobs:
       - name: Download artifact from previous workflow
         uses: dawidd6/action-download-artifact@v6
         with:
+          # می‌توانید از نام فایل workflow اصلی استفاده کنید
           workflow: download.yml
+          # شماره اجرای موفق (که در لیست می‌بینید)
           run_id: 9
+          # نام دقیق Artifact (همان bert-model)
           name: bert-model
+          # مسیری که فایل‌ها در آن ذخیره شوند
           path: ./downloaded-model
-      
+
       - name: Upload as new artifact
         uses: actions/upload-artifact@v4
         with:
