@@ -1,4 +1,4 @@
-name: دانلود مدل NLLB-200 فارسی
+name: دانلود مدل ترجمه انگلیسی به فارسی
 
 on:
   workflow_dispatch:
@@ -11,9 +11,8 @@ jobs:
         with:
           python-version: '3.10'
       - run: pip install huggingface_hub
-      - run: mkdir -p models
-      - run: huggingface-cli download Helsinki-NLP/opus-mt-en-fa --local-dir ./model_en_fa
+      - run: huggingface-cli download Helsinki-NLP/opus-mt-en-fa --local-dir ./model
       - uses: actions/upload-artifact@v4
         with:
-          name: nllb-model
-          path: ./models
+          name: opus-mt-en-fa
+          path: ./model
