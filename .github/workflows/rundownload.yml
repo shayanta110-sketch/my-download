@@ -13,7 +13,7 @@ jobs:
       - name: Download artifact from previous workflow
         uses: dawidd6/action-download-artifact@v6
         with:
-          workflow: دانلود مدل ترجمه انگلیسی به فارسی.yml
+          workflow: download.yml
           run_id: 9
           name: bert-model
           path: ./downloaded-model
