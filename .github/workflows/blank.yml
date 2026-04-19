@@ -18,9 +18,7 @@ jobs:
           pip install huggingface_hub transformers
 
       # -----------------------------------------------------------------
-      # ۱. دانلود مدل EraX-Translator-V1.0 (نسخه Q4_K_M) - مدل قدرتمند و بهینه‌شده
-      #    این مدل نیاز به ۲.۶ گیگابایت VRAM دارد و سرعت بالایی ارائه می‌دهد.
-      #    لینک منبع: https://huggingface.co/erax-ai/EraX-Translator-V1.0-GGUF
+      # ۱. دانلود مدل EraX-Translator-V1.0 (نسخه Q4_K_M)
       # -----------------------------------------------------------------
       - name: دانلود مدل EraX-Translator-V1.0 از Hugging Face
         run: |
@@ -30,74 +28,18 @@ jobs:
             --local-dir-use-symlinks False
 
       # -----------------------------------------------------------------
-      # ۲. دانلود مدل NLLB-200 (نسخه بهینه‌شده برای فارسی) - مدل تخصصی فارسی
-      #    این مدل توسط Paulwalker4884 برای ترجمه فارسی به انگلیسی بهینه‌سازی شده است.
-      #    لینک منبع: https://huggingface.co/Paulwalker4884/facebook-persian
+      # ۲. دانلود مدل NLLB-200 (نسخه بهینه‌شده برای فارسی)
       # -----------------------------------------------------------------
       - name: دانلود مدل NLLB-200 (نسخه فارسی) از Hugging Face
         run: |
-          # دانلود مدل با استفاده از huggingface-cli
           huggingface-cli download Paulwalker4884/facebook-persian --local-dir ./models/facebook-persian
-          
-          # تبدیل خودکار مدل به فرمت GGUF (اختیاری)
-          # از آنجایی که این مدل به صورت پیش‌فرض با transformers سازگار است،
-          # می‌توان آن را مستقیماً در کد پایتون با کتابخانه transformers بارگذاری کرد.
-          
-          # برای استفاده در محیط‌های llama.cpp، می‌توان مدل را با ابزار convert.py تبدیل کرد.
-          # python llama.cpp/convert.py ./models/facebook-persian --outfile ./models/nllb-200-persian.gguf
 
       # -----------------------------------------------------------------
-      # ۳. (اختیاری) دانلود نسخه GGUF مدل NLLB-200
-      #    اگر نیاز به نسخه GGUF دارید، می‌توانید از لینک زیر استفاده کنید:
-      #    https://huggingface.co/ggml-org/nllb-200-distilled-600M-GGUF
-      # -----------------------------------------------------------------
-      # - name: دانلود نسخه GGUF مدل NLLB-200
-      #   run: |
-      #     huggingface-cli download ggml-org/nllb-200-distilled-600M-GGUF nllb-200-distilled-600M-Q4_K_M.gguf \
-      #       --local-dir ./models \
-      #       --local-dir-use-symlinks False
-
-      # -----------------------------------------------------------------
-      # ذخیره فایل‌ها به عنوان Artifact برای دانلود دستی
+      # ۳. ذخیره فایل‌ها به عنوان Artifact
       # -----------------------------------------------------------------
       - name: آپلود مدل‌های دانلود شده
         uses: actions/upload-artifact@v4
         with:
           name: translation-models
           path: |
-            ./models# This is a basic workflow to help you get started with Actions
-
-name: CI
-
-# Controls when the workflow will run
-on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
-
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
-jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
-    runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
-    steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
-
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
-
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
-        run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+            ./models
