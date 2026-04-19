@@ -1,0 +1,25 @@
+name: "Download Artifact from Previous Run"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  download_artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download artifact from previous workflow
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: دانلود مدل ترجمه انگلیسی به فارسی.yml
+          run_id: 9
+          name: bert-model
+          path: ./downloaded-model
+      
+      - name: Upload as new artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: my-new-model
+          path: ./downloaded-model
