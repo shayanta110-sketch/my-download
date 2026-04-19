@@ -12,7 +12,7 @@ jobs:
           python-version: '3.10'
       - run: pip install huggingface_hub
       - run: mkdir -p models
-      - run: huggingface-cli download Paulwalker4884/facebook-persian --local-dir ./models/facebook-persian
+      - run: huggingface-cli download HPLT/translate-en-fa-v2.0-hplt_opus --local-dir ./model
       - uses: actions/upload-artifact@v4
         with:
           name: nllb-model
