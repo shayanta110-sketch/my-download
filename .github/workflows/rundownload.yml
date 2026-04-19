@@ -16,7 +16,7 @@ jobs:
           # می‌توانید از نام فایل workflow اصلی استفاده کنید
           workflow: download.yml
           # شماره اجرای موفق (که در لیست می‌بینید)
-          run_id: 9
+          run_id: 10
           # نام دقیق Artifact (همان bert-model)
           name: bert-model
           # مسیری که فایل‌ها در آن ذخیره شوند
