@@ -1,2 +1,2 @@
-URL=https://example.com/download-page
+URL=https://coinmarketcap.com/
 DEPTH=1
