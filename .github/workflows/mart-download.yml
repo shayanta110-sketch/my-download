@@ -1,0 +1,235 @@
+name: "Smart Website Downloader"
+
+on:
+  workflow_dispatch:
+    inputs:
+      custom_url:
+        description: 'لینک صفحه (اختیاری، در صورت وارد شدن جایگزین config.txt می‌شود)'
+        required: false
+        type: string
+      custom_depth:
+        description: 'عمق جستجو (پیش‌فرض 1)'
+        required: false
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '5'
+
+jobs:
+  smart-download:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Python dependencies
+        run: pip install requests beautifulsoup4 urllib3
+
+      - name: Read configuration or use workflow inputs
+        id: config
+        run: |
+          if [ -n "${{ github.event.inputs.custom_url }}" ]; then
+            URL="${{ github.event.inputs.custom_url }}"
+            DEPTH="${{ github.event.inputs.custom_depth }}"
+          elif [ -f config.txt ]; then
+            source config.txt
+          else
+            echo "ERROR: No URL provided and config.txt not found"
+            exit 1
+          fi
+          echo "URL=$URL" >> $GITHUB_OUTPUT
+          echo "DEPTH=$DEPTH" >> $GITHUB_OUTPUT
+          echo "Downloading from $URL with depth $DEPTH"
+
+      - name: Run Python crawler & downloader
+        run: |
+          python3 - <<EOF
+          import os, requests, time, urllib.parse, re, hashlib
+          from bs4 import BeautifulSoup
+          from urllib.parse import urljoin, urlparse
+          from collections import deque
+          import sys
+
+          # ========== تنظیمات کاربر ==========
+          START_URL = "${{ steps.config.outputs.URL }}"
+          MAX_DEPTH = int("${{ steps.config.outputs.DEPTH }}")
+          DOWNLOAD_DIR = "./downloaded_site"
+          ALLOWED_EXTENSIONS = ('.zip', '.rar', '.exe', '.msi', '.7z', '.tar.gz', '.tgz', '.mp4', '.mkv', '.avi', '.mov', '.mp3', '.wav', '.flac', '.jpg', '.jpeg', '.png', '.gif', '.pdf', '.doc', '.docx', '.xls', '.xlsx')
+          # اگر می‌خواهید HTML هم دانلود شود، true بگذارید.
+          DOWNLOAD_HTML = False
+          # =================================
+
+          os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+          visited_urls = set()
+          queue = deque([(START_URL, 0)])  # (url, depth)
+
+          # برای جلوگیری از دانلود تکراری بر اساس URL
+          downloaded_urls = set()
+
+          def get_file_extension(url):
+              path = urllib.parse.urlparse(url).path
+              if '.' in path:
+                  ext = '.' + path.split('.')[-1].lower()
+                  # تطابق پسوند چندبخشی مثل .tar.gz
+                  if ext == '.gz' and path.endswith('.tar.gz'):
+                      ext = '.tar.gz'
+                  return ext
+              return ''
+
+          def is_downloadable(url, content_type=None):
+              ext = get_file_extension(url)
+              if ext and ext in ALLOWED_EXTENSIONS:
+                  return True
+              # بررسی content-type در صورت وجود
+              if content_type and content_type.startswith('application/') and 'zip' in content_type:
+                  return True
+              return False
+
+          def download_file(url, output_path):
+              try:
+                  headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                  r = requests.get(url, stream=True, timeout=30, headers=headers)
+                  if r.status_code == 200:
+                      with open(output_path, 'wb') as f:
+                          for chunk in r.iter_content(chunk_size=8192):
+                              f.write(chunk)
+                      return True
+                  else:
+                      print(f"  ❌ Failed {url} (status {r.status_code})")
+                      return False
+              except Exception as e:
+                  print(f"  ❌ Error downloading {url}: {e}")
+                  return False
+
+          def get_links_from_page(url, current_depth):
+              if current_depth > MAX_DEPTH:
+                  return []
+              headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+              try:
+                  r = requests.get(url, timeout=15, headers=headers)
+                  if r.status_code != 200:
+                      return []
+                  soup = BeautifulSoup(r.text, 'html.parser')
+                  links = []
+                  for a in soup.find_all('a', href=True):
+                      href = a['href']
+                      full = urljoin(url, href)
+                      # فقط لینک‌های هم‌دامنه یا مطلق با پروتکل http/https
+                      if full.startswith('http'):
+                          links.append(full)
+                  return links
+              except:
+                  return []
+
+          print(f"🚀 Starting crawl from {START_URL} with depth {MAX_DEPTH}")
+          print(f"📁 Download directory: {DOWNLOAD_DIR}")
+
+          # مرحله 1: خرمن کردن (crawling) برای جمع‌آوری لینک‌های قابل دانلود
+          all_download_links = set()
+          while queue:
+              cur_url, depth = queue.popleft()
+              if cur_url in visited_urls:
+                  continue
+              visited_urls.add(cur_url)
+              print(f"🌐 Visiting [{depth}] {cur_url}")
+
+              # بررسی آیا خود این URL قابل دانلود است
+              if is_downloadable(cur_url):
+                  all_download_links.add(cur_url)
+                  print(f"   🎯 Found downloadable link: {cur_url}")
+              
+              # اگر عمق مجاز است، لینک‌های صفحه را استخراج کن
+              if depth < MAX_DEPTH:
+                  child_links = get_links_from_page(cur_url, depth+1)
+                  for link in child_links:
+                      if link not in visited_urls:
+                          queue.append((link, depth+1))
+              time.sleep(0.5)  # تاخیر ملایم برای احترام به سرور
+
+          print(f"\n✅ Found {len(all_download_links)} downloadable URLs")
+
+          # مرحله 2: دانلود فایل‌ها
+          downloaded_count = 0
+          for i, url in enumerate(all_download_links, 1):
+              # تولید نام فایل بر اساس آخرین بخش URL
+              parsed = urlparse(url)
+              filename = os.path.basename(parsed.path)
+              if not filename:
+                  # اگر نام فایل خالی بود، از هش URL استفاده کن
+                  filename = hashlib.md5(url.encode()).hexdigest()
+                  ext = get_file_extension(url)
+                  if ext:
+                      filename += ext
+                  else:
+                      filename += '.bin'
+              filepath = os.path.join(DOWNLOAD_DIR, filename)
+              # تغییر نام در صورت تکراری
+              base, ext = os.path.splitext(filename)
+              counter = 1
+              while os.path.exists(filepath):
+                  filepath = os.path.join(DOWNLOAD_DIR, f"{base}_{counter}{ext}")
+                  counter += 1
+              print(f"⬇️ [{i}/{len(all_download_links)}] Downloading {filename}")
+              if download_file(url, filepath):
+                  downloaded_count += 1
+              else:
+                  print(f"   ⚠️ Skipped {url}")
+
+          print(f"\n📦 Downloaded {downloaded_count} files to {DOWNLOAD_DIR}")
+          # اگر HTML هم باید دانلود شود
+          if DOWNLOAD_HTML:
+              html_dir = os.path.join(DOWNLOAD_DIR, "html_pages")
+              os.makedirs(html_dir, exist_ok=True)
+              with open(os.path.join(html_dir, "index.html"), 'w', encoding='utf-8') as f:
+                  f.write(f"<html><body><h1>Downloaded files from {START_URL}</h1><ul>")
+                  for url in all_download_links:
+                      f.write(f"<li><a href='{url}'>{url}</a></li>")
+                  f.write("</ul></body></html>")
+              print(f"   📄 HTML index created in {html_dir}")
+
+          EOF
+
+      - name: Create ZIP archive of downloaded files
+        run: |
+          zip -r smart-download.zip downloaded_site/
+          echo "ZIP created: smart-download.zip ($(du -sh smart-download.zip | cut -f1))"
+
+      - name: Create Git tag (unique)
+        id: tag
+        run: |
+          TAG_NAME="smart-download-${{ github.run_number }}-$(date +'%Y%m%d%H%M%S')"
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG_NAME" -m "Smart download ${{ github.run_number }}"
+          git push origin "$TAG_NAME"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release and upload ZIP
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.TAG_NAME }}
+          name: "Smart Download ${{ github.run_number }}"
+          body: |
+            ## 📦 دانلود هوشمند از سایت
+            **لینک شروع:** ${{ steps.config.outputs.URL }}
+            **عمق جستجو:** ${{ steps.config.outputs.DEPTH }}
+            **تعداد فایل‌های دانلود شده:** (به لاگ مراجعه کنید)
+            
+            فایل ZIP شامل همه فایل‌های یافت شده است.
+          files: smart-download.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
