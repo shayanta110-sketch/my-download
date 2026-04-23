@@ -16,7 +16,7 @@ jobs:
       - name: Download model directly from Hugging Face
         run: |
           wget https://huggingface.co/WeightedAI/Persian_OCR/resolve/main/pytorch_model.bin -O ./downloaded-model/pytorch_model.bin
-          # اگر فایل‌های دیگری هم دارید، آن‌ها را هم اینجا اضافه کنید
+          # اگر فایل‌های دیگری دارید، اینجا اضافه کنید
 
       - name: Calculate total size
         id: check-size
@@ -39,10 +39,8 @@ jobs:
       - name: Create RAR volumes (500MB each) with numbering from 01
         if: steps.check-size.outputs.single_file == 'false'
         run: |
-          # فشرده‌سازی کل پوشه به صورت RAR با حجم 500 مگابایت
           rar a -v500m -ep1 -m5 model.rar ./downloaded-model/
-
-          # تغییر نام فایل‌ها به part01.rar, part02.rar, ...
+          # تغییر نام به part01.rar, part02.rar, ...
           for file in model.part*.rar; do
             number=$(echo "$file" | grep -oP '(?<=model\.part)\d+')
             printf -v new_name "part%02d.rar" "$number"
@@ -62,6 +60,12 @@ jobs:
           rar a -ep1 -m5 model.rar ./downloaded-model/
           mv model.rar part01.rar
 
+      - name: Upload all parts as intermediate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rar-parts
+          path: part*.rar
+
       - name: Generate part list for matrix upload
         id: set-parts
         run: |
@@ -80,7 +84,7 @@ jobs:
       matrix:
         part: ${{ fromJson(needs.prepare_parts.outputs.part_list) }}
     steps:
-      - name: Download parts from previous job
+      - name: Download all parts from previous job
         uses: actions/download-artifact@v4
         with:
           name: rar-parts
