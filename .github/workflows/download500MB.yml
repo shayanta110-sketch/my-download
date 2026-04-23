@@ -15,7 +15,7 @@ jobs:
 
       - name: Download model directly from Hugging Face
         run: |
-          wget https://huggingface.co/WeightedAI/Persian_OCR/resolve/main/pytorch_model.bin -O ./downloaded-model/pytorch_model.bin
+          wget https://huggingface.co/mradermacher/DeepSeek-R1-Distill-Qwen-1.5B-Abliterated-dpo-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Abliterated-dpo.Q5_K_M.gguf -O ./downloaded-model/DeepSeek-R1-Distill-Qwen-1.5B-Abliterated-dpo.Q5_K_M.gguf
           # اگر فایل‌های دیگری دارید، اینجا اضافه کنید
 
       - name: Calculate total size
