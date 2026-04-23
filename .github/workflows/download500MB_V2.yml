@@ -1,0 +1,86 @@
+name: "V2 Download and Split Large Model from Hugging Face"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  prepare_and_release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create download directory
+        run: mkdir -p ./downloaded-model
+
+      - name: Download model directly from Hugging Face
+        run: |
+          wget https://huggingface.co/mradermacher/PsychoCounsel-Llama3-8B-GGUF/resolve/main/PsychoCounsel-Llama3-8B.Q5_K_M.gguf -O ./downloaded-model/PsychoCounsel-Llama3-8B.Q5_K_M.gguf
+          wget https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q8_0.gguf -O ./downloaded-model/SmolLM2-135M-Instruct-Q8_0.gguf
+          wget https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF/resolve/main/bge-reranker-v2-m3-Q6_K.gguf -O ./downloaded-model/bge-reranker-v2-m3-Q6_K.gguf
+
+      - name: Calculate total size
+        id: check-size
+        run: |
+          total_bytes=$(du -sb ./downloaded-model | cut -f1)
+          total_mb=$((total_bytes / 1024 / 1024))
+          echo "Total size: ${total_mb} MB"
+          if [ $total_bytes -gt 900000000 ]; then
+            echo "single_file=false" >> $GITHUB_OUTPUT
+          else
+            echo "single_file=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create ZIP archive with 500MB split parts
+        if: steps.check-size.outputs.single_file == 'false'
+        run: |
+          # ایجاد فایل ZIP با تقسیم خودکار به قطعات 500 مگابایتی
+          # خروجی: model.z01, model.z02, ..., model.zip
+          zip -s 500m -r model.zip ./downloaded-model/
+          
+          # لیست فایل‌های ساخته شده
+          echo "Files created by zip -s:"
+          ls -lh model.z* model.zip 2>/dev/null
+          
+          # تغییر نام به فرمت part01.zip, part02.zip, ...
+          # ابتدا فایل model.zip را به part آخر تبدیل می‌کنیم (آخرین قطعه)
+          # شماره قطعه‌ها از 01 شروع می‌شود
+          part_num=1
+          # جابجایی فایل‌های .z* که قطعات هستند
+          for file in $(ls -v model.z* 2>/dev/null); do
+            printf -v new_name "part%02d.zip" "$part_num"
+            mv "$file" "$new_name"
+            echo "Created: $new_name"
+            ((part_num++))
+          done
+          # فایل model.zip را به عنوان آخرین قطعه (یا تکی اگر زیاد نباشد)
+          if [ -f model.zip ]; then
+            printf -v new_name "part%02d.zip" "$part_num"
+            mv model.zip "$new_name"
+            echo "Created: $new_name"
+          fi
+
+      - name: Create single ZIP file (when size <= 900MB)
+        if: steps.check-size.outputs.single_file == 'true'
+        run: |
+          zip -r model.zip ./downloaded-model/
+          mv model.zip part01.zip
+          echo "Created: part01.zip"
+
+      - name: Create GitHub Release and upload files
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: model-download-${{ github.run_number }}
+          name: "Model Download ${{ github.run_number }}"
+          body: |
+            ## 📦 فایل‌های مدل دانلود شده
+            این انتشار شامل فایل‌های زیر است:
+            $(ls part*.zip 2>/dev/null | sed 's/^/- /')
+            
+            برای استخراج فایل اصلی:
+            1. همه فایل‌های part*.zip را دانلود کنید.
+            2. در لینوکس/مک: `cat part*.zip > combined.zip && unzip combined.zip`
+            3. در ویندوز: همه فایل‌ها را در یک پوشه قرار دهید، سپس با 7-Zip یا WinRAR فایل part01.zip را باز کنید.
+          files: |
+            part*.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
