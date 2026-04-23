@@ -64,12 +64,21 @@ jobs:
       - name: Create Git tag
         id: tag
         run: |
-          TAG_NAME="model-download-${{ github.run_number }}"
+          # مقدار یکتا برای tag (شامل زمان)
+          TAG_NAME="model-download-${{ github.run_number }}-$(date +'%Y%m%d%H%M%S')"
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
+          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
-          git push origin "$TAG_NAME"
+          
+          # اطمینان از همگام بودن مخزن محلی با ریموت
+          git pull origin main --rebase || true
+          
+          # ساخت tag (اگر قبلاً وجود داشته باشد، با -f بازنویسی می‌کند)
+          git tag -a "$TAG_NAME" -m "Release $TAG_NAME" || git tag -a -f "$TAG_NAME" -m "Release $TAG_NAME"
+          
+          # پوش tag به ریموت (با -f در صورت نیاز)
+          git push origin "$TAG_NAME" || git push -f origin "$TAG_NAME"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -80,15 +89,13 @@ jobs:
           name: "Model Download ${{ github.run_number }}"
           body: |
             ## 📦 فایل‌های مدل دانلود شده
-            این انتشار شامل فایل‌های زیر است:
             $(for f in part*.zip; do echo "- $f"; done)
             
             برای استخراج فایل اصلی:
             1. همه فایل‌های part*.zip را دانلود کنید.
             2. در لینوکس/مک: `cat part*.zip > combined.zip && unzip combined.zip`
             3. در ویندوز: همه فایل‌ها را در یک پوشه قرار دهید، سپس با 7-Zip یا WinRAR فایل part01.zip را باز کنید.
-          files: |
-            part*.zip
+          files: part*.zip
           draft: false
           prerelease: false
         env:
