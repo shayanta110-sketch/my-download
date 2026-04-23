@@ -1,4 +1,4 @@
-name: "Download and Split Large Model from Hugging Face"
+name: "V2_Download and Split Large Model from Hugging Face"
 
 on:
   workflow_dispatch:
@@ -9,6 +9,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Create download directory
         run: mkdir -p ./downloaded-model
 
@@ -71,14 +74,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # اطمینان از همگام بودن مخزن محلی با ریموت
-          git pull origin main --rebase || true
+          # ساخت tag
+          git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
           
-          # ساخت tag (اگر قبلاً وجود داشته باشد، با -f بازنویسی می‌کند)
-          git tag -a "$TAG_NAME" -m "Release $TAG_NAME" || git tag -a -f "$TAG_NAME" -m "Release $TAG_NAME"
-          
-          # پوش tag به ریموت (با -f در صورت نیاز)
-          git push origin "$TAG_NAME" || git push -f origin "$TAG_NAME"
+          # پوش tag به ریموت
+          git push origin "$TAG_NAME"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
