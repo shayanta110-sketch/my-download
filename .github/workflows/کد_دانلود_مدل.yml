@@ -106,10 +106,8 @@ jobs:
           # ================================
           vscode_dir="./downloaded-resources/vscode-extensions"
           
-          # نصب ابزار offvsix
           pip install offvsix
           
-          # ایجاد فایل متنی حاوی لیست افزونه‌های VS Code
           cat > extensions.txt << EOF
           ms-python.python
           ms-python.vscode-pylance
@@ -118,7 +116,6 @@ jobs:
           ms-python.black-formatter
           EOF
           
-          # دانلود افزونه‌ها با offvsix
           offvsix --file extensions.txt --destination "$vscode_dir" || echo "❌ برخی افزونه‌های VS Code دانلود نشدند" >> "$vscode_dir/FAILED.txt"
           
           echo "✅ دانلودها با موفقیت انجام شد (موارد ناموفق در فایل‌های FAILED.txt ثبت شده‌اند)"
@@ -173,30 +170,32 @@ jobs:
           cat status_table.md >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-      - name: Create ZIP archive with split parts (if needed)
+      - name: Create ZIP archive
         run: |
-          total_bytes=$(du -sb ./downloaded-resources | cut -f1)
-          total_mb=$((total_bytes / 1024 / 1024))
-          echo "Total size: ${total_mb} MB"
-          if [ $total_bytes -gt 900000000 ]; then
-            zip -s 500m -r resources.zip ./downloaded-resources/
-            part_num=1
-            for file in $(ls -v resources.z* 2>/dev/null); do
-              printf -v new_name "part%02d.zip" "$part_num"
-              mv "$file" "$new_name"
-              ((part_num++))
-            done
-            if [ -f resources.zip ]; then
-              printf -v new_name "part%02d.zip" "$part_num"
-              mv resources.zip "$new_name"
-            fi
-          else
-            zip -r resources.zip ./downloaded-resources/
-            mv resources.zip part01.zip
+          # حذف فایل‌های زیپ قبلی در صورت وجود
+          rm -f resources.zip part*.zip
+          
+          # ساخت زیپ بدون اسپلیت
+          zip -r resources.zip ./downloaded-resources/
+          
+          # تغییر نام به part01.zip
+          mv resources.zip part01.zip
+          
+          # تأیید وجود فایل و نمایش اطلاعات
+          echo "✅ فایل part01.zip ساخته شد:"
+          ls -la part01.zip
+          du -sh part01.zip
+          
+          # اگر فایل وجود نداشت، خطا بده
+          if [ ! -f part01.zip ]; then
+            echo "❌ خطا: فایل part01.zip ساخته نشد!"
+            exit 1
           fi
 
       - name: List generated parts
-        run: ls -la part*.zip
+        run: |
+          echo "فایل‌های آماده برای آپلود:"
+          ls -la part*.zip
 
       - name: Create Git tag
         id: tag
@@ -218,17 +217,16 @@ jobs:
           body: |
             ## 📦 بسته کامل منابع برای نصب آفلاین
             
-            این ریلیز شامل تمام فایل‌هایی است که امکان دانلود مستقیم داشتند. برای جزئیات وضعیت هر آیتم به جدول زیر مراجعه کنید.
+            این ریلیز شامل تمام فایل‌هایی است که امکان دانلود مستقیم داشتند.
             
             ${{ env.STATUS_TABLE }}
             
             ### 🔧 نحوه استفاده:
-            1. فایل‌های `part*.zip` را دانلود کنید.
-            2. در لینوکس/مک: `cat part*.zip > combined.zip && unzip combined.zip`
-            3. در ویندوز: با 7-Zip فایل `part01.zip` را Extract کنید.
-            4. محتویات پوشه `downloaded-resources` را به سیستم آفلاین منتقل کنید.
+            1. فایل `part01.zip` را از بخش Assets (پایین همین صفحه) دانلود کنید.
+            2. فایل را Extract کنید.
+            3. پوشه `downloaded-resources` را به سیستم آفلاین منتقل کنید.
             
-            ### 📌 آموزش نصب آفلاین افزونه‌های VS Code:
+            ### 📌 نصب آفلاین افزونه‌های VS Code:
             - پس از انتقال فایل‌های `.vsix` به کامپیوتر آفلاین، در ترمینال VS Code اجرا کنید:
               ```bash
               code --install-extension مسیر/فایل.vsix
