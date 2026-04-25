@@ -1,0 +1,58 @@
+name: "YouTube Search & Metadata"
+
+on:
+  workflow_dispatch:
+    inputs:
+      search_query:
+        description: '🔍 کلمه جستجو در یوتیوب'
+        required: true
+        default: 'آموزش پایتون'
+      max_results:
+        description: '🔢 تعداد نتایج (حداکثر ۲۰)'
+        required: true
+        default: '10'
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python and yt-dlp
+        run: pip install yt-dlp
+
+      - name: Search YouTube and display results
+        run: |
+          SEARCH_TERM="${{ github.event.inputs.search_query }}"
+          MAX_RESULTS="${{ github.event.inputs.max_results }}"
+          
+          echo "========================================="
+          echo "🔍 جستجو برای: $SEARCH_TERM"
+          echo "📊 حداکثر نتایج: $MAX_RESULTS"
+          echo "========================================="
+          
+          yt-dlp "ytsearch${MAX_RESULTS}:${SEARCH_TERM}" --ignore-errors --no-warnings --dump-json > results.json
+          
+          echo ""
+          echo "📋 نتایج جستجو:"
+          echo "----------------------------------------------------------------------------------------------------"
+          printf "%-4s | %-50s | %-10s | %s\n" "ردیف" "عنوان" "مدت زمان" "لینک"
+          echo "----------------------------------------------------------------------------------------------------"
+          
+          jq -r 'to_entries[] | "\(.key+1) | \(.value.title[0:47])... | \(.value.duration_string // "N/A") | \(.value.original_url)"' results.json | while IFS=' | ' read -r row title duration url; do
+            printf "%-4s | %-50s | %-10s | %s\n" "$row" "$title" "$duration" "$url"
+          done
+          
+          echo "----------------------------------------------------------------------------------------------------"
+          echo ""
+          echo "📌 لیست لینک‌ها (برای کپی و استفاده در Workflow دانلود):"
+          echo "----------------------------------------"
+          jq -r '.[] | .original_url' results.json
+          echo "----------------------------------------"
+          
+          # ذخیره لینک‌ها در یک فایل (اختیاری - قابل دانلود از بخش Artifacts)
+          jq -r '.[] | .original_url' results.json > urls.txt
+          
+      - name: Upload urls.txt as artifact (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: search-urls
+          path: urls.txt
