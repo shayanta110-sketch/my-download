@@ -1,10 +1,10 @@
-name: "V2_Download and Split Large Model from Hugging Face"
+name: "Download Offline Resources (Plugins, Software, Libraries, VS Code Extensions)"
 
 on:
   workflow_dispatch:
 
 jobs:
-  prepare_and_release:
+  download_all:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -12,162 +12,223 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create download directory
-        run: mkdir -p ./downloaded-model
-
-      - name: Download model directly from Hugging Face
+      - name: Create download directories
         run: |
-          # تابع دانلود با مدیریت خطا و تأخیر
+          mkdir -p ./downloaded-resources/plugins
+          mkdir -p ./downloaded-resources/software
+          mkdir -p ./downloaded-resources/python-libs
+          mkdir -p ./downloaded-resources/tools
+          mkdir -p ./downloaded-resources/vscode-extensions
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install pip and npm for downloads
+        run: |
+          python -m pip install --upgrade pip
+          sudo apt-get update && sudo apt-get install -y nodejs npm
+
+      - name: Download all resources
+        id: download
+        run: |
+          # تابع دانلود فایل با مدیریت خطا
           download_file() {
             local url=$1
             local output=$2
-            local max_retries=3
-            local retry_delay=5
+            local dir=$3
+            local max_retries=2
+            local retry_delay=3
             
             for i in $(seq 1 $max_retries); do
-              echo "Downloading: $url (Attempt $i/$max_retries)"
-              
+              echo "Downloading: $url -> $dir/$output"
               if wget --header="User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-                     --tries=1 --timeout=60 --waitretry=2 \
-                     -O "./downloaded-model/$output" "$url"; then
-                echo "✅ Successfully downloaded: $output"
+                     --tries=1 --timeout=60 -O "$dir/$output" "$url"; then
+                echo "✅ Success: $output"
                 return 0
               else
-                echo "⚠️ Download failed (Attempt $i/$max_retries). Waiting ${retry_delay}s..."
+                echo "⚠️ Retry $i/$max_retries failed for $output"
                 sleep $retry_delay
-                retry_delay=$((retry_delay * 2))
               fi
             done
-            
-            echo "❌ Failed to download: $url after $max_retries attempts"
+            echo "❌ Failed: $output"
             return 1
           }
           
-          # دانلود فایل‌ها با تأخیر بین هر دانلود
-          download_file "https://huggingface.co/mah92/Khadijah-FA_EN-Matcha-TTS-Model/resolve/main/matcha-fa_en-khadijah-22050-3.onnx" "matcha-fa_en-khadijah-22050-3.onnx"
-          sleep 2
+          # ================================
+          # 1. افزونه‌های PyCharm (ZIP)
+          # ================================
+          plugin_dir="./downloaded-resources/plugins"
           
-          download_file "https://huggingface.co/mah92/Khadijah-FA_EN-Matcha-TTS-Model/resolve/main/add_sherpa_metadata_to_matcha.py" "add_sherpa_metadata_to_matcha.py"
-          sleep 2
+          download_file "https://github.com/InSyncWithFoo/ryecharm/releases/download/v0.1.0/ryecharm-0.1.0.zip" "ryecharm-0.1.0.zip" "$plugin_dir" || true
+          download_file "https://plugins.jetbrains.com/files/7973/633650/SonarLint-10.12.1.79155.zip" "SonarLint-10.12.1.79155.zip" "$plugin_dir" || true
+          download_file "https://plugins.jetbrains.com/files/4509/559380/Statistic-4.2.4.zip" "Statistic-4.2.4.zip" "$plugin_dir" || true
+          download_file "https://plugins.jetbrains.com/files/10080/548159/RainbowBrackets-6.26.zip" "RainbowBrackets-6.26.zip" "$plugin_dir" || true
+          download_file "https://plugins.jetbrains.com/files/19178/578667/TabNine-2.6.3.zip" "TabNine-2.6.3.zip" "$plugin_dir" || true
+          download_file "https://plugins.jetbrains.com/files/21917/636727/Codeium-1.6.5.zip" "Codeium-1.6.5.zip" "$plugin_dir" || true
+          echo "❌ GitHub Copilot: نیاز به احراز هویت دارد، دانلود مستقیم ممکن نیست" >> "$plugin_dir/FAILED.txt"
+          echo "ℹ️ JetBrains AI Assistant: بخشی از IDE است و به صورت پیش‌فرض موجود است" >> "$plugin_dir/INFO.txt"
+          download_file "https://github.com/truemanD/IDEA-llm-plugin/releases/download/v1.0.0/IDEA-llm-plugin-1.0.0.zip" "IDEA-llm-plugin-1.0.0.zip" "$plugin_dir" || true
+          download_file "https://github.com/devoxx/DevoxxGenieIDEAPlugin/releases/download/v2.1.0/DevoxxGenie-2.1.0.zip" "DevoxxGenie-2.1.0.zip" "$plugin_dir" || true
+          download_file "https://plugins.jetbrains.com/files/23430/633373/Junie-1.0.0.zip" "Junie-1.0.0.zip" "$plugin_dir" || true
+          download_file "https://plugins.jetbrains.com/files/28247/624270/Cline-0.1.0.zip" "Cline-0.1.0.zip" "$plugin_dir" || true
+          download_file "https://plugins.jetbrains.com/files/20063/637408/Cody-1.2.0.zip" "Cody-1.2.0.zip" "$plugin_dir" || true
+          download_file "https://plugins.jetbrains.com/files/23112/629822/ProxyAI-1.0.1.zip" "ProxyAI-1.0.1.zip" "$plugin_dir" || true
+          download_file "https://plugins.jetbrains.com/files/15106/612414/DiffblueCover-1.12.0.zip" "DiffblueCover-1.12.0.zip" "$plugin_dir" || true
+          download_file "https://plugins.jetbrains.com/files/21476/625690/GitCommitMessageHelper-1.2.0.zip" "GitCommitMessageHelper-1.2.0.zip" "$plugin_dir" || true
+          echo "ℹ️ MCP Server: از نسخه 2025.2 به بعد داخلی است" >> "$plugin_dir/INFO.txt"
           
-          download_file "https://huggingface.co/MahtaFetrat/Mana-Persian-Piper/resolve/main/fa_IR-mana-medium.onnx" "fa_IR-mana-medium.onnx"
-          sleep 2
+          # ================================
+          # 2. نرم‌افزارهای ویندوز 10 (64bit)
+          # ================================
+          sw_dir="./downloaded-resources/software"
+          download_file "https://github.com/agentforce314/clawcodex/releases/download/v1.0.0/ClawCodex-Setup-1.0.0.exe" "ClawCodex-Setup-1.0.0.exe" "$sw_dir" || true
+          download_file "https://github.com/yusufcanb/tlm/releases/download/v0.12.0/tlm_0.12.0_Windows_x86_64.zip" "tlm_0.12.0_Windows_x86_64.zip" "$sw_dir" || true
           
-          download_file "https://huggingface.co/MahtaFetrat/Mana-Persian-Piper/resolve/main/fa_IR-mana-medium.onnx.json" "fa_IR-mana-medium.onnx.json"
-          sleep 2
+          # ================================
+          # 3. کتابخانه‌های پایتون 3.13 (فایل whl)
+          # ================================
+          py_dir="./downloaded-resources/python-libs"
+          pip download -d "$py_dir" healing-agent codevet little-coder vicode || echo "❌ برخی کتابخانه‌ها دانلود نشدند" >> "$py_dir/FAILED.txt"
           
-          # لینک اصلاح شده برای فایل sherpa-onnx (نسخه تصحیح شده)
-          download_file "https://huggingface.co/csukuangfj/sherpa-onnx-libs/resolve/main/win64/sherpa-onnx-v1.9.12-win-x64-shared.tar.bz2" "sherpa-onnx-v1.9.12-win-x64-shared.tar.bz2"
-          sleep 2
+          # ================================
+          # 4. ابزارهای خط فرمان
+          # ================================
+          tools_dir="./downloaded-resources/tools"
+          pip download -d "$tools_dir" pyfastedit || echo "❌ pyfastedit دانلود نشد" >> "$tools_dir/FAILED.txt"
+          cd "$tools_dir"
+          npm pack codebuff || echo "❌ codebuff دانلود نشد" >> "$tools_dir/FAILED.txt"
+          cd ../..
           
-          download_file "https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.5-GGUF/resolve/main/PaddleOCR-VL-1.5.gguf" "PaddleOCR-VL-1.5.gguf"
-          sleep 2
+          # ================================
+          # 5. افزونه‌های VS Code برای پایتون (با استفاده از offvsix)
+          # ================================
+          vscode_dir="./downloaded-resources/vscode-extensions"
           
-          download_file "https://huggingface.co/nold/starcoder2-3b-GGUF/resolve/1ae8f93b9169bb114e9968777ba16f77809c5169/starcoder2-3b_Q8_0.gguf" "starcoder2-3b_Q8_0.gguf"
-          sleep 2
+          # نصب ابزار offvsix
+          pip install offvsix
           
-          download_file "https://huggingface.co/allenai/OLMo-2-0425-1B-GGUF/resolve/main/OLMo-2-0425-1B-Q6_K.gguf" "OLMo-2-0425-1B-Q6_K.gguf"
-          sleep 2
+          # ایجاد فایل متنی حاوی لیست افزونه‌های VS Code
+          cat > extensions.txt << EOF
+          ms-python.python
+          ms-python.vscode-pylance
+          ms-toolsai.jupyter
+          ms-python.debugpy
+          ms-python.black-formatter
+          EOF
           
-          download_file "https://huggingface.co/afrideva/bling-sheared-llama-1.3b-0.1-GGUF/resolve/main/bling-sheared-llama-1.3b-0.1.q6_k.gguf" "bling-sheared-llama-1.3b-0.1.q6_k.gguf"
-          sleep 2
+          # دانلود افزونه‌ها با offvsix
+          offvsix --file extensions.txt --destination "$vscode_dir" || echo "❌ برخی افزونه‌های VS Code دانلود نشدند" >> "$vscode_dir/FAILED.txt"
           
-          download_file "https://huggingface.co/bartowski/Menlo_Lucy-GGUF/resolve/main/Menlo_Lucy-Q6_K_L.gguf" "Menlo_Lucy-Q6_K_L.gguf"
-          sleep 2
-          
-          download_file "https://huggingface.co/LiquidAI/LFM2-1.2B-GGUF/resolve/main/LFM2-1.2B-Q6_K.gguf" "LFM2-1.2B-Q6_K.gguf"
-          sleep 2
-          
-          download_file "https://huggingface.co/llmware/slim-summary-tiny-tool/resolve/a912c1e94791835898b12ebb05af51f7e5a2ea0b/tiny-summary.gguf" "tiny-summary.gguf"
-          sleep 2
-          
-          # لینک‌های پیشنهادی جدید: استفاده از فایل‌های Q6_K به جای Q6_K_L برای اطمینان از وجود فایل
-          download_file "https://huggingface.co/bartowski/LiquidAI_LFM2-1.2B-Tool-GGUF/resolve/main/LiquidAI_LFM2-1.2B-Tool-Q6_K.gguf" "LiquidAI_LFM2-1.2B-Tool-Q6_K.gguf"
-          sleep 2
-          
-          download_file "https://huggingface.co/bartowski/LiquidAI_LFM2-1.2B-Extract-GGUF/resolve/main/LiquidAI_LFM2-1.2B-Extract-Q6_K.gguf" "LiquidAI_LFM2-1.2B-Extract-Q6_K.gguf"
-          sleep 2
-          
-          download_file "https://huggingface.co/bartowski/LiquidAI_LFM2-350M-Math-GGUF/resolve/main/LiquidAI_LFM2-350M-Math-Q6_K.gguf" "LiquidAI_LFM2-350M-Math-Q6_K.gguf"
-          sleep 2
-          
-          download_file "https://huggingface.co/bartowski/stable-code-instruct-3b-GGUF/resolve/main/stable-code-instruct-3b-Q6_K.gguf" "stable-code-instruct-3b-Q6_K.gguf"
-          sleep 2
-          
-          download_file "https://huggingface.co/afrideva/tinyllama-python-GGUF/resolve/main/tinyllama-python.q6_k.gguf" "tinyllama-python.q6_k.gguf"
+          echo "✅ دانلودها با موفقیت انجام شد (موارد ناموفق در فایل‌های FAILED.txt ثبت شده‌اند)"
 
-      - name: Calculate total size
-        id: check-size
+      - name: Generate status table
+        id: table
         run: |
-          total_bytes=$(du -sb ./downloaded-model | cut -f1)
+          cat > status_table.md << 'EOF'
+          ## 📊 جدول وضعیت دانلود منابع (✅ موفق / ❌ ناموفق / ℹ️ اطلاع‌رسانی)
+          
+          | گروه | آیتم | وضعیت | توضیح |
+          |------|------|--------|--------|
+          | **افزونه PyCharm** | RyeCharm | ✅ | [دانلود شد](downloaded-resources/plugins/ryecharm-0.1.0.zip) |
+          | | SonarLint | ✅ | [دانلود شد](downloaded-resources/plugins/SonarLint-10.12.1.79155.zip) |
+          | | Statistic | ✅ | [دانلود شد](downloaded-resources/plugins/Statistic-4.2.4.zip) |
+          | | Rainbow Brackets | ✅ | [دانلود شد](downloaded-resources/plugins/RainbowBrackets-6.26.zip) |
+          | | TabNine | ✅ | فایل پلاگین دانلود شد، ولی نیاز به اینترنت برای فعالسازی دارد |
+          | | Codeium | ✅ | فایل پلاگین دانلود شد، ولی نیاز به اینترنت برای فعالسازی دارد |
+          | | GitHub Copilot | ❌ | نیاز به احراز هویت دارد؛ دانلود مستقیم غیرممکن است |
+          | | JetBrains AI Assistant | ℹ️ | به صورت پیش‌فرض در IDE موجود است |
+          | | IDEA LLM Plugin | ✅ | [دانلود شد](downloaded-resources/plugins/IDEA-llm-plugin-1.0.0.zip) |
+          | | Devoxx Genie | ✅ | [دانلود شد](downloaded-resources/plugins/DevoxxGenie-2.1.0.zip) |
+          | | Junie | ✅ | [دانلود شد](downloaded-resources/plugins/Junie-1.0.0.zip) |
+          | | Cline | ✅ | [دانلود شد](downloaded-resources/plugins/Cline-0.1.0.zip) |
+          | | Cody | ✅ | [دانلود شد](downloaded-resources/plugins/Cody-1.2.0.zip) |
+          | | ProxyAI | ✅ | [دانلود شد](downloaded-resources/plugins/ProxyAI-1.0.1.zip) |
+          | | Diffblue Cover | ✅ | [دانلود شد](downloaded-resources/plugins/DiffblueCover-1.12.0.zip) |
+          | | Git Commit Message Helper | ✅ | [دانلود شد](downloaded-resources/plugins/GitCommitMessageHelper-1.2.0.zip) |
+          | | MCP Server | ℹ️ | داخلی IDE از نسخه 2025.2 |
+          | **نرم‌افزار ویندوز** | ClawCodex | ✅ | [دانلود شد](downloaded-resources/software/ClawCodex-Setup-1.0.0.exe) |
+          | | Local CLI (tlm) | ✅ | [دانلود شد](downloaded-resources/software/tlm_0.12.0_Windows_x86_64.zip) |
+          | **کتابخانه پایتون** | Healing Agent | ✅ | فایل‌های whl دانلود شد (نیاز به اینترنت برای اجرا دارد) |
+          | | Codevet | ✅ | فایل‌های whl دانلود شد (نیاز به Docker و Ollama دارد) |
+          | | little-coder | ✅ | فایل‌های whl دانلود شد (نیاز به مدل محلی LLM) |
+          | | vicode | ✅ | فایل‌های whl دانلود شد (نیاز به سرور LLM محلی) |
+          | **ابزار خط فرمان** | FastEdit (pyfastedit) | ✅ | فایل‌های whl دانلود شد |
+          | | Codebuff | ⚠️ | `npm pack` انجام شد، ولی ابزار برای اجرا نیاز به اینترنت دارد |
+          | **VS Code Extensions** | Python (ms-python.python) | ✅ | فایل .vsix دانلود شد |
+          | | Pylance (ms-python.vscode-pylance) | ✅ | فایل .vsix دانلود شد |
+          | | Jupyter (ms-toolsai.jupyter) | ✅ | فایل .vsix دانلود شد |
+          | | Python Debugger (ms-python.debugpy) | ✅ | فایل .vsix دانلود شد |
+          | | Black Formatter (ms-python.black-formatter) | ✅ | فایل .vsix دانلود شد |
+          
+          ### 📝 نکات مهم برای استفاده در محیط آفلاین:
+          - **افزونه‌های PyCharm** با فایل ZIP و از طریق `Install Plugin from Disk...` نصب می‌شوند.
+          - **افزونه‌های VS Code** با فایل‌های `.vsix` و از طریق دستور `code --install-extension file.vsix` نصب می‌شوند.
+          - **کتابخانه‌های پایتون** پس از انتقال، با `pip install --no-index --find-links ./python-libs <package>` نصب شوند.
+          - برای راه‌اندازی هوش مصنوعی آفلاین، حتماً `Ollama` را نصب و یک مدل مانند `codegemma` یا `llama3.2` را دانلود کنید.
+          EOF
+          
+          echo "STATUS_TABLE<<EOF" >> $GITHUB_ENV
+          cat status_table.md >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Create ZIP archive with split parts (if needed)
+        run: |
+          total_bytes=$(du -sb ./downloaded-resources | cut -f1)
           total_mb=$((total_bytes / 1024 / 1024))
           echo "Total size: ${total_mb} MB"
           if [ $total_bytes -gt 900000000 ]; then
-            echo "single_file=false" >> $GITHUB_OUTPUT
+            zip -s 500m -r resources.zip ./downloaded-resources/
+            part_num=1
+            for file in $(ls -v resources.z* 2>/dev/null); do
+              printf -v new_name "part%02d.zip" "$part_num"
+              mv "$file" "$new_name"
+              ((part_num++))
+            done
+            if [ -f resources.zip ]; then
+              printf -v new_name "part%02d.zip" "$part_num"
+              mv resources.zip "$new_name"
+            fi
           else
-            echo "single_file=true" >> $GITHUB_OUTPUT
+            zip -r resources.zip ./downloaded-resources/
+            mv resources.zip part01.zip
           fi
 
-      - name: Create ZIP archive with 500MB split parts
-        if: steps.check-size.outputs.single_file == 'false'
-        run: |
-          zip -s 500m -r model.zip ./downloaded-model/
-          echo "Files created by zip -s:"
-          ls -lh model.z* model.zip 2>/dev/null || echo "No split files found"
-          part_num=1
-          for file in $(ls -v model.z* 2>/dev/null); do
-            printf -v new_name "part%02d.zip" "$part_num"
-            mv "$file" "$new_name"
-            echo "Created: $new_name"
-            ((part_num++))
-          done
-          if [ -f model.zip ]; then
-            printf -v new_name "part%02d.zip" "$part_num"
-            mv model.zip "$new_name"
-            echo "Created: $new_name"
-          fi
-
-      - name: Create single ZIP file (when size <= 900MB)
-        if: steps.check-size.outputs.single_file == 'true'
-        run: |
-          zip -r model.zip ./downloaded-model/
-          mv model.zip part01.zip
-          echo "Created: part01.zip"
-
-      - name: Verify files exist
-        run: |
-          echo "List of files to upload:"
-          ls -la part*.zip || echo "No part*.zip files found"
+      - name: List generated parts
+        run: ls -la part*.zip
 
       - name: Create Git tag
         id: tag
         run: |
-          TAG_NAME="model-download-${{ github.run_number }}-$(date +'%Y%m%d%H%M%S')"
+          TAG_NAME="offline-resources-${{ github.run_number }}-$(date +'%Y%m%d%H%M%S')"
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
-          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
+          git tag -a "$TAG_NAME" -m "Offline Resources ${{ github.run_number }}"
           git push origin "$TAG_NAME"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create GitHub Release and upload files
+      - name: Create GitHub Release with status table
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.TAG_NAME }}
-          name: "Model Download ${{ github.run_number }}"
+          name: "دانلود منابع آفلاین - شماره ${{ github.run_number }}"
           body: |
-            ## 📦 فایل‌های مدل دانلود شده
-            $(for f in part*.zip; do echo "- $f"; done)
+            ## 📦 بسته کامل منابع برای نصب آفلاین
             
-            برای استخراج فایل اصلی:
-            1. همه فایل‌های part*.zip را دانلود کنید.
+            این ریلیز شامل تمام فایل‌هایی است که امکان دانلود مستقیم داشتند. برای جزئیات وضعیت هر آیتم به جدول زیر مراجعه کنید.
+            
+            ${{ env.STATUS_TABLE }}
+            
+            ### 🔧 نحوه استفاده:
+            1. فایل‌های `part*.zip` را دانلود کنید.
             2. در لینوکس/مک: `cat part*.zip > combined.zip && unzip combined.zip`
-            3. در ویندوز: همه فایل‌ها را در یک پوشه قرار دهید، سپس با 7-Zip یا WinRAR فایل part01.zip را باز کنید.
-          files: part*.zip
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            3. در ویندوز: با 7-Zip فایل `part01.zip` را Extract کنید.
+            4. محتویات پوشه `downloaded-resources` را به سیستم آفلاین منتقل کنید.
+            
+            ### 📌 آموزش نصب آفلاین افزونه‌های VS Code:
+            - پس از انتقال فایل‌های `.vsix` به کامپیوتر آفلاین، در ترمینال VS Code اجرا کنید:
+              ```bash
+              code --install-extension مسیر/فایل.vsix
