@@ -15,9 +15,6 @@ jobs:
       - name: Create download directory
         run: mkdir -p ./downloaded-model
 
-      - name: Install huggingface-hub
-        run: pip install huggingface-hub
-
       - name: Download model directly from Hugging Face
         run: |
           # تابع دانلود با مدیریت خطا و تأخیر
@@ -30,12 +27,9 @@ jobs:
             for i in $(seq 1 $max_retries); do
               echo "Downloading: $url (Attempt $i/$max_retries)"
               
-              # استفاده از wget با هدرهای مناسب
               if wget --header="User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-                     --tries=1 \
-                     --timeout=30 \
-                     -O "$output" \
-                     "$url"; then
+                     --tries=1 --timeout=60 --waitretry=2 \
+                     -O "./downloaded-model/$output" "$url"; then
                 echo "✅ Successfully downloaded: $output"
                 return 0
               else
@@ -50,55 +44,57 @@ jobs:
           }
           
           # دانلود فایل‌ها با تأخیر بین هر دانلود
-          download_file "https://huggingface.co/mah92/Khadijah-FA_EN-Matcha-TTS-Model/resolve/main/matcha-fa_en-khadijah-22050-3.onnx" "./downloaded-model/matcha-fa_en-khadijah-22050-3.onnx"
+          download_file "https://huggingface.co/mah92/Khadijah-FA_EN-Matcha-TTS-Model/resolve/main/matcha-fa_en-khadijah-22050-3.onnx" "matcha-fa_en-khadijah-22050-3.onnx"
           sleep 2
           
-          download_file "https://huggingface.co/mah92/Khadijah-FA_EN-Matcha-TTS-Model/resolve/main/add_sherpa_metadata_to_matcha.py" "./downloaded-model/add_sherpa_metadata_to_matcha.py"
+          download_file "https://huggingface.co/mah92/Khadijah-FA_EN-Matcha-TTS-Model/resolve/main/add_sherpa_metadata_to_matcha.py" "add_sherpa_metadata_to_matcha.py"
           sleep 2
           
-          download_file "https://huggingface.co/MahtaFetrat/Mana-Persian-Piper/resolve/main/fa_IR-mana-medium.onnx" "./downloaded-model/fa_IR-mana-medium.onnx"
+          download_file "https://huggingface.co/MahtaFetrat/Mana-Persian-Piper/resolve/main/fa_IR-mana-medium.onnx" "fa_IR-mana-medium.onnx"
           sleep 2
           
-          download_file "https://huggingface.co/MahtaFetrat/Mana-Persian-Piper/resolve/main/fa_IR-mana-medium.onnx.json" "./downloaded-model/fa_IR-mana-medium.onnx.json"
+          download_file "https://huggingface.co/MahtaFetrat/Mana-Persian-Piper/resolve/main/fa_IR-mana-medium.onnx.json" "fa_IR-mana-medium.onnx.json"
           sleep 2
           
-          download_file "https://huggingface.co/csukuangfj/sherpa-onnx-libs/resolve/main/win64/sherpa-onnx-v1.12.39-win-x64-shared-MD-Release.tar.bz2" "./downloaded-model/sherpa-onnx-v1.12.39-win-x64-shared-MD-Release.tar.bz2"
+          # لینک اصلاح شده برای فایل sherpa-onnx (نسخه تصحیح شده)
+          download_file "https://huggingface.co/csukuangfj/sherpa-onnx-libs/resolve/main/win64/sherpa-onnx-v1.9.12-win-x64-shared.tar.bz2" "sherpa-onnx-v1.9.12-win-x64-shared.tar.bz2"
           sleep 2
           
-          download_file "https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.5-GGUF/resolve/main/PaddleOCR-VL-1.5-GGUF.gguf" "./downloaded-model/PaddleOCR-VL-1.5-GGUF.gguf"
+          download_file "https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.5-GGUF/resolve/main/PaddleOCR-VL-1.5.gguf" "PaddleOCR-VL-1.5.gguf"
           sleep 2
           
-          download_file "https://huggingface.co/nold/starcoder2-3b-GGUF/resolve/1ae8f93b9169bb114e9968777ba16f77809c5169/starcoder2-3b_Q8_0.gguf" "./downloaded-model/starcoder2-3b_Q8_0.gguf"
+          download_file "https://huggingface.co/nold/starcoder2-3b-GGUF/resolve/1ae8f93b9169bb114e9968777ba16f77809c5169/starcoder2-3b_Q8_0.gguf" "starcoder2-3b_Q8_0.gguf"
           sleep 2
           
-          download_file "https://huggingface.co/allenai/OLMo-2-0425-1B-GGUF/resolve/main/OLMo-2-0425-1B-Q6_K.gguf" "./downloaded-model/OLMo-2-0425-1B-Q6_K.gguf"
+          download_file "https://huggingface.co/allenai/OLMo-2-0425-1B-GGUF/resolve/main/OLMo-2-0425-1B-Q6_K.gguf" "OLMo-2-0425-1B-Q6_K.gguf"
           sleep 2
           
-          download_file "https://huggingface.co/afrideva/bling-sheared-llama-1.3b-0.1-GGUF/resolve/main/bling-sheared-llama-1.3b-0.1.q6_k.gguf" "./downloaded-model/bling-sheared-llama-1.3b-0.1.q6_k.gguf"
+          download_file "https://huggingface.co/afrideva/bling-sheared-llama-1.3b-0.1-GGUF/resolve/main/bling-sheared-llama-1.3b-0.1.q6_k.gguf" "bling-sheared-llama-1.3b-0.1.q6_k.gguf"
           sleep 2
           
-          download_file "https://huggingface.co/bartowski/Menlo_Lucy-GGUF/resolve/main/Menlo_Lucy-Q6_K_L.gguf" "./downloaded-model/Menlo_Lucy-Q6_K_L.gguf"
+          download_file "https://huggingface.co/bartowski/Menlo_Lucy-GGUF/resolve/main/Menlo_Lucy-Q6_K_L.gguf" "Menlo_Lucy-Q6_K_L.gguf"
           sleep 2
           
-          download_file "https://huggingface.co/LiquidAI/LFM2-1.2B-GGUF/resolve/main/LFM2-1.2B-Q6_K.gguf" "./downloaded-model/LFM2-1.2B-Q6_K.gguf"
+          download_file "https://huggingface.co/LiquidAI/LFM2-1.2B-GGUF/resolve/main/LFM2-1.2B-Q6_K.gguf" "LFM2-1.2B-Q6_K.gguf"
           sleep 2
           
-          download_file "https://huggingface.co/llmware/slim-summary-tiny-tool/resolve/a912c1e94791835898b12ebb05af51f7e5a2ea0b/tiny-summary.gguf" "./downloaded-model/tiny-summary.gguf"
+          download_file "https://huggingface.co/llmware/slim-summary-tiny-tool/resolve/a912c1e94791835898b12ebb05af51f7e5a2ea0b/tiny-summary.gguf" "tiny-summary.gguf"
           sleep 2
           
-          download_file "https://huggingface.co/bartowski/LiquidAI_LFM2-1.2B-Tool-GGUF/resolve/main/LiquidAI_LFM2-1.2B-Tool-Q6_K_L.gguf" "./downloaded-model/LiquidAI_LFM2-1.2B-Tool-Q6_K_L.gguf"
+          # لینک‌های پیشنهادی جدید: استفاده از فایل‌های Q6_K به جای Q6_K_L برای اطمینان از وجود فایل
+          download_file "https://huggingface.co/bartowski/LiquidAI_LFM2-1.2B-Tool-GGUF/resolve/main/LiquidAI_LFM2-1.2B-Tool-Q6_K.gguf" "LiquidAI_LFM2-1.2B-Tool-Q6_K.gguf"
           sleep 2
           
-          download_file "https://huggingface.co/bartowski/LiquidAI_LFM2-1.2B-Extract-GGUF/resolve/main/LiquidAI_LFM2-1.2B-Extract-Q6_K_L.gguf" "./downloaded-model/LiquidAI_LFM2-1.2B-Extract-Q6_K_L.gguf"
+          download_file "https://huggingface.co/bartowski/LiquidAI_LFM2-1.2B-Extract-GGUF/resolve/main/LiquidAI_LFM2-1.2B-Extract-Q6_K.gguf" "LiquidAI_LFM2-1.2B-Extract-Q6_K.gguf"
           sleep 2
           
-          download_file "https://huggingface.co/bartowski/LiquidAI_LFM2-350M-Math-GGUF/resolve/main/LiquidAI_LFM2-350M-Math-Q6_K_L.gguf" "./downloaded-model/LiquidAI_LFM2-350M-Math-Q6_K_L.gguf"
+          download_file "https://huggingface.co/bartowski/LiquidAI_LFM2-350M-Math-GGUF/resolve/main/LiquidAI_LFM2-350M-Math-Q6_K.gguf" "LiquidAI_LFM2-350M-Math-Q6_K.gguf"
           sleep 2
           
-          download_file "https://huggingface.co/bartowski/stable-code-instruct-3b-GGUF/resolve/main/stable-code-instruct-3b-Q6_K.gguf" "./downloaded-model/stable-code-instruct-3b-Q6_K.gguf"
+          download_file "https://huggingface.co/bartowski/stable-code-instruct-3b-GGUF/resolve/main/stable-code-instruct-3b-Q6_K.gguf" "stable-code-instruct-3b-Q6_K.gguf"
           sleep 2
           
-          download_file "https://huggingface.co/afrideva/tinyllama-python-GGUF/resolve/main/tinyllama-python.q6_k.gguf" "./downloaded-model/tinyllama-python.q6_k.gguf"
+          download_file "https://huggingface.co/afrideva/tinyllama-python-GGUF/resolve/main/tinyllama-python.q6_k.gguf" "tinyllama-python.q6_k.gguf"
 
       - name: Calculate total size
         id: check-size
