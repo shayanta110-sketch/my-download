@@ -174,43 +174,4 @@ jobs:
           draft: false
           prerelease: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}        run: |
-          echo "List of files to upload:"
-          ls -la part*.zip || echo "No part*.zip files found"
-
-      - name: Create Git tag
-        id: tag
-        run: |
-          # مقدار یکتا برای tag (شامل زمان)
-          TAG_NAME="model-download-${{ github.run_number }}-$(date +'%Y%m%d%H%M%S')"
-          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
-          
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # ساخت tag
-          git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
-          
-          # پوش tag به ریموت
-          git push origin "$TAG_NAME"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create GitHub Release and upload files
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.TAG_NAME }}
-          name: "Model Download ${{ github.run_number }}"
-          body: |
-            ## 📦 فایل‌های مدل دانلود شده
-            $(for f in part*.zip; do echo "- $f"; done)
-            
-            برای استخراج فایل اصلی:
-            1. همه فایل‌های part*.zip را دانلود کنید.
-            2. در لینوکس/مک: `cat part*.zip > combined.zip && unzip combined.zip`
-            3. در ویندوز: همه فایل‌ها را در یک پوشه قرار دهید، سپس با 7-Zip یا WinRAR فایل part01.zip را باز کنید.
-          files: part*.zip
-          draft: false
-          prerelease: false
-        env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
