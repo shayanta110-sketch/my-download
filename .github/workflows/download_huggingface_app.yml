@@ -17,10 +17,7 @@ jobs:
 
       - name: Download all APK files from hf-mirror
         run: |
-          # ... (لیست لینک‌های دانلود شما، دقیقاً به همان شکلی که در کد قبلی بود)
-          # برای اختصار، بدنه این حلقه در این نمونه قرار داده نشده اما باید عیناً باشد.
-          # ...
-          # اطمینان حاصل کنید که حلقه دانلود فایل‌ها در اینجا قرار دارد.
+          # لیست لینک‌های دانلود مستقیم (resolve + download=true)
           URLs=(
             "https://hf-mirror.com/csukuangfj2/sherpa-onnx-apk/resolve/main/tts-engine-new/1.12.40/sherpa-onnx-1.12.40-arm64-v8a-fa-tts-engine-matcha-tts-fa_en-khadijah.apk?download=true"
             "https://hf-mirror.com/csukuangfj2/sherpa-onnx-apk/resolve/main/tts-engine-new/1.12.40/sherpa-onnx-1.12.40-arm64-v8a-fa-tts-engine-vits-piper-fa_IR-reza_ibrahim-medium.apk?download=true"
@@ -45,20 +42,67 @@ jobs:
           done
 
       # ============================================================
-      # مرحله‌ی ساده و نهایی برای ایجاد یک فایل ZIP آپلود شود
+      # مرحله‌ی اصلی: محاسبه حجم، تصمیم‌گیری و تقسیم فایل‌ها
       # ============================================================
-      - name: Package all APKs into a single ZIP file
+      - name: Calculate total size and decide on splitting
+        id: check-size
         run: |
-          zip -r apks-collection.zip ./downloaded-apks/
+          total_bytes=$(du -sb ./downloaded-apks | cut -f1)
+          total_mb=$((total_bytes / 1024 / 1024))
+          echo "Total size: ${total_mb} MB"
+          if [ $total_bytes -gt 900000000 ]; then
+            echo "single_file=false" >> $GITHUB_OUTPUT
+          else
+            echo "single_file=true" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Create GitHub Release and Upload Asset
+      - name: Create ZIP archive with 500MB split parts (if needed)
+        if: steps.check-size.outputs.single_file == 'false'
+        run: |
+          # ایجاد فایل‌های تقسیم‌شده با دستور zip
+          zip -s 500m -r model.zip ./downloaded-apks/
+          
+          # تغییر نام فایل‌های ایجاد شده به فرم partXX.zip
+          part_num=1
+          for file in $(ls -v model.z* 2>/dev/null); do
+            printf -v new_name "part%02d.zip" "$part_num"
+            mv "$file" "$new_name"
+            echo "Created: $new_name"
+            ((part_num++))
+          done
+          if [ -f model.zip ]; then
+            printf -v new_name "part%02d.zip" "$part_num"
+            mv model.zip "$new_name"
+            echo "Created: $new_name"
+          fi
+          
+          echo "✅ ZIP file split into parts of 500MB each."
+
+      - name: Create single ZIP file (if size <= 900MB)
+        if: steps.check-size.outputs.single_file == 'true'
+        run: |
+          zip -r model.zip ./downloaded-apks/
+          mv model.zip part01.zip
+          echo "Created: part01.zip"
+          echo "✅ Single ZIP file created (size <= 900MB)."
+
+      - name: Verify files exist before upload
+        run: |
+          echo "List of files to upload:"
+          ls -la part*.zip || echo "❌ No part*.zip files found. Something went wrong!"
+
+      - name: Create GitHub Release and Upload Assets
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "apks-collection.zip"
-          tag: "apks-v1.0"  # میتوانید این نام را هر طور که میخواهید تغییر دهید
-          name: "دانلود مجموعه APK‌های موتور TTS فارسی"
-          body: "این فایل ZIP شامل تمام فایل‌های APK مورد نظر شماست. برای استخراج، آن را در سیستم خود دانلود و unzip کنید."
-          token: ${{ secrets.GITHUB_TOKEN }}
-          allowUpdates: true
-          artifactErrorsFailBuild: true
-      # ============================================================
+          artifacts: "part*.zip"   # الگویی برای آپلود تمام فایل‌های partXX.zip
+          tag: "apks-v2.0"         # می‌توانید نام تگ را به دلخواه تغییر دهید
+          name: "دانلود مجموعه APK‌های موتور TTS فارسی (نسخه تقسیم‌شده)"
+          body: |
+            ## 📦 فایل‌های APK دانلود شده و بسته‌بندی شده
+
+            ### اگر حجم کل فایل‌ها از 900MB بیشتر بود:
+            فایل ZIP به چند بخش 500MB تقسیم شده است. برای استخراج فایل اصلی، باید همه فایل‌های `part*.zip` را دانلود کرده و با دستور زیر ترکیب کنید:
+
+            **در لینوکس/مک:**
+            ```bash
+            cat part*.zip > combined.zip && unzip combined.zip
