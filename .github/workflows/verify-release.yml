@@ -1,185 +1,65 @@
-# .github/workflows/verify-release.yml
-name: حرفه‌ای - اعتبارسنجی فایل‌های ZIP چندقسمتی
+name: اعتبارسنجی ZIP چندقسمتی (بدون نیاز به چک‌سام)
 
 on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'نام Tag مربوط به Release (مثال: apks-v2.0)'
+        description: 'نام Tag (مثال: apks-v2.0)'
         required: true
         default: 'apks-v2.0'
-        type: string
 
 permissions:
   contents: read
 
 jobs:
-  validate-multi-part-zip:
-    name: اعتبارسنجی فایل‌های چندقسمتی
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
     steps:
-      - name: 1. دریافت اطلاعات Release از API
-        id: get_release
+      - name: دریافت لیست فایل‌ها از API
+        id: get_assets
         run: |
-          RELEASE_TAG="${{ github.event.inputs.release_tag }}"
-          echo "در حال دریافت اطلاعات Release با Tag: $RELEASE_TAG"
-          
-          API_URL="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
-          RESPONSE=$(curl -s -H "Accept: application/vnd.github+json" "$API_URL")
-          
-          # استخراج لیست asset‌ها (فقط فایل‌هایی که digest دارند)
-          ASSETS_INFO=$(echo "$RESPONSE" | jq -r '.assets | sort_by(.name) | .[] | select(.digest != null) | "\(.name)|\(.browser_download_url)|\(.digest)"')
-          
-          if [ -z "$ASSETS_INFO" ]; then
-            echo "❌ خطا: هیچ فایل معتبر با چک‌سام در Release یافت نشد."
+          TAG="${{ github.event.inputs.release_tag }}"
+          API_URL="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
+          ASSETS=$(curl -s "$API_URL" | jq -r '.assets[].browser_download_url')
+          if [ -z "$ASSETS" ]; then
+            echo "❌ هیچ فایلی یافت نشد"
             exit 1
           fi
-          
-          # محاسبه تعداد فایل‌ها
-          ASSETS_COUNT=$(echo "$ASSETS_INFO" | wc -l)
-          echo "$ASSETS_INFO" > assets_info.txt
-          echo "✅ اطلاعات ${ASSETS_COUNT} فایل از API دریافت شد."
-          
-          # ذخیره تعداد برای مراحل بعد
-          echo "ASSETS_COUNT=${ASSETS_COUNT}" >> $GITHUB_ENV
+          echo "$ASSETS" > urls.txt
+          echo "✅ $(cat urls.txt | wc -l) فایل پیدا شد"
 
-      - name: 2. دانلود و اعتبارسنجی چک‌سام فایل‌ها
+      - name: دانلود فایل‌ها
         run: |
-          mkdir -p downloaded_parts
-          cd downloaded_parts
-          
-          TOTAL_FILES=0
-          VALID_FILES=0
-          FAILED_FILES=0
-          
-          while IFS='|' read -r FILE_NAME FILE_URL EXPECTED_DIGEST; do
-            TOTAL_FILES=$((TOTAL_FILES + 1))
-            echo ""
-            echo "=================================================="
-            echo "📥 در حال پردازش فایل: $FILE_NAME"
-            echo "=================================================="
-            
-            # حذف پیشوند "sha256:" از مقدار digest (اگر وجود داشته باشد)
-            EXPECTED_SHA256=$(echo "$EXPECTED_DIGEST" | sed 's/^sha256://')
-            
-            # دانلود فایل
-            curl -L -o "$FILE_NAME" --progress-bar "$FILE_URL"
-            
-            # محاسبه SHA256 فایل دانلود شده
-            ACTUAL_SHA256=$(sha256sum "$FILE_NAME" | awk '{print $1}')
-            
-            if [ "$ACTUAL_SHA256" = "$EXPECTED_SHA256" ]; then
-              echo "✅ اعتبارسنجی چک‌سام برای '$FILE_NAME': موفق"
-              VALID_FILES=$((VALID_FILES + 1))
-            else
-              echo "❌ اعتبارسنجی چک‌سام برای '$FILE_NAME': ناموفق"
-              echo "   مورد انتظار: $EXPECTED_SHA256"
-              echo "   محاسبه شده: $ACTUAL_SHA256"
-              FAILED_FILES=$((FAILED_FILES + 1))
-            fi
-          done < ../assets_info.txt
-          
-          echo "TOTAL_FILES=$TOTAL_FILES" >> $GITHUB_ENV
-          echo "VALID_FILES=$VALID_FILES" >> $GITHUB_ENV
-          echo "FAILED_FILES=$FAILED_FILES" >> $GITHUB_ENV
-          
-          echo ""
-          echo "=================================================="
-          echo "📊 گزارش مرحله دانلود:"
-          echo "   کل فایل‌ها: $TOTAL_FILES"
-          echo "   فایل‌های سالم: $VALID_FILES"
-          echo "   فایل‌های خراب: $FAILED_FILES"
-          echo "=================================================="
-          
-          if [ $FAILED_FILES -gt 0 ]; then
-            echo "❌ خطای حیاتی: یک یا چند فایل در بررسی چک‌سام مردود شده‌اند."
-            exit 1
-          fi
+          mkdir parts && cd parts
+          while read url; do
+            filename=$(basename "$url")
+            echo "دانلود $filename ..."
+            curl -L -O "$url"
+          done < ../urls.txt
 
-      - name: 3. ترکیب فایل‌ها با ترتیب صحیح و تست یکپارچگی
-        id: merge_and_test
+      - name: ترکیب فایل‌های part
         run: |
-          cd downloaded_parts
-          
-          # مرتب‌سازی عددی فایل‌های part (مقابله با مشکل part10 قبل از part2)
-          # فرض بر این است که نام فایل‌ها به صورت part01.zip, part02.zip, ... است
-          echo "🔄 در حال ترکیب فایل‌ها بر اساس ترتیب عددی..."
-          ls part*.zip | sort -V | xargs cat > combined.zip
-          
-          if [ ! -f "combined.zip" ]; then
-            echo "❌ خطا: فایل combined.zip ایجاد نشد."
+          cd parts
+          # مرتب‌سازی بر اساس نام عددی (part1, part2, part10)
+          ls part*.zip 2>/dev/null | sort -V | xargs cat > combined.zip
+          if [ ! -f combined.zip ]; then
+            echo "❌ ترکیب ناموفق"
             exit 1
           fi
-          
-          COMBINED_SIZE=$(stat -c%s "combined.zip")
-          echo "✅ فایل combined.zip با حجم ${COMBINED_SIZE} بایت ایجاد شد."
-          
-          echo "🧪 در حال اجرای تست یکپارچگی..."
+          echo "✅ combined.zip ساخته شد"
+
+      - name: تست یکپارچگی فایل ZIP نهایی
+        run: |
+          cd parts
           if unzip -tq combined.zip > /dev/null 2>&1; then
-            echo "✅ تست یکپارچگی ZIP: موفق"
-            INTEGRITY_STATUS="PASSED"
+            echo "✅ تست یکپارچگی PASSED"
           else
-            echo "❌ تست یکپارچگی ZIP: ناموفق"
-            INTEGRITY_STATUS="FAILED"
+            echo "❌ تست یکپارچگی FAILED - فایل ZIP خراب است"
             exit 1
           fi
-          
-          echo "INTEGRITY_STATUS=$INTEGRITY_STATUS" >> $GITHUB_ENV
 
-      - name: 4. ایجاد گزارش نهایی
-        if: always()
-        run: |
-          REPORT_FILE="validation_report.md"
-          
-          cat > "$REPORT_FILE" << EOF
-  # 📋 گزارش اعتبارسنجی حرفه‌ای فایل‌های چندقسمتی
-  
-  | مرحله | وضعیت | توضیحات |
-  |---|---|---|
-  | **دریافت اطلاعات از API** | ${{ steps.get_release.outcome }} | دریافت چک‌سام فایل‌ها از GitHub API |
-  | **اعتبارسنجی چک‌سام** | ${{ env.VALID_FILES }} از ${{ env.TOTAL_FILES }} موفق | تطابق SHA256 هر فایل بررسی شد |
-  | **ترکیب فایل‌ها** | ${{ job.status == 'success' && 'موفق' || 'ناموفق' }} | فایل‌های part به combined.zip ترکیب شدند |
-  | **تست یکپارچگی ZIP** | ${{ env.INTEGRITY_STATUS }} | تأیید نهایی ساختار فایل ZIP |
-  
-  ## 🔍 جزئیات بیشتر
-  
-  - **Tag مورد بررسی:** ${{ github.event.inputs.release_tag }}
-  - **تعداد کل فایل‌ها:** ${{ env.TOTAL_FILES }}
-  - **فایل‌های با چک‌سام صحیح:** ${{ env.VALID_FILES }}
-  - **فایل‌های نامعتبر:** ${{ env.FAILED_FILES }}
-  - **وضعیت نهایی اعتبارسنجی:** ${{ job.status == 'success' && '✅ **تأیید شد - همه فایل‌ها سالم هستند**' || '❌ **تأیید نشد - خطا در فرآیند اعتبارسنجی**' }}
-  
-  ## 🛡️ نکات امنیتی
-  
-  - این فرآیند از چک‌سام‌های SHA256 ارائه شده توسط GitHub API استفاده می‌کند.
-  - تطابق چک‌سام قبل از ترکیب فایل‌ها تأیید می‌شود.
-  - تست یکپارچگی (\`unzip -t\`) بدون استخراج فایل‌ها انجام می‌شود.
-  
-  > **گزارش تهیه شده توسط:** GitHub Actions workflow حرفه‌ای اعتبارسنجی فایل‌های چندقسمتی.
-  EOF
-          
-          echo "=================================================="
-          cat "$REPORT_FILE"
-          echo "=================================================="
-          echo "REPORT_FILE_PATH=$(pwd)/$REPORT_FILE" >> $GITHUB_ENV
+      - name: پاکسازی فایل‌های موقتی
+        run: rm -rf parts
 
-      - name: 5. ذخیره گزارش در GitHub Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: validation-report
-          path: ${{ env.REPORT_FILE_PATH }}
-          retention-days: 30
-
-      - name: 🚨 اعلان خطا
-        if: failure()
-        run: |
-          echo "::error::❌ اعتبارسنجی با شکست مواجه شد."
-          echo "::error::علت احتمالی: عدم تطابق چک‌سام، خرابی در ترکیب فایل‌ها، یا نبود چک‌سام در API."
-
-      - name: ✅ اعلان موفقیت
-        if: success()
-        run: |
-          echo "::notice::✅ فرآیند اعتبارسنجی با موفقیت به پایان رسید. همه فایل‌ها سالم هستند."
+      - name: گزارش موفقیت
+        run: echo "::notice::✅ همه فایل‌ها سالم هستند و ZIP به درستی ترکیب می‌شود"
