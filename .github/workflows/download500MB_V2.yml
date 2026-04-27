@@ -17,7 +17,7 @@ jobs:
 
       - name: Download model directly from Hugging Face
         run: |
-          wget https://huggingface.co/noctrex/SmallThinker-4B-A0.6B-Instruct-MXFP4_MOE-GGUF/resolve/main/SmallThinker-4BA0.6B-Instruct-i1-MXFP4_MOE.gguf -O ./downloaded-model/SmallThinker-4BA0.6B-Instruct-i1-MXFP4_MOE.gguf
+          wget https://huggingface.co/mradermacher/MoE-Pilot-Align-2.7B-i1-GGUF/resolve/main/MoE-Pilot-Align-2.7B.i1-Q4_K_M.gguf -O ./downloaded-model/MoE-Pilot-Align-2.7B.i1-Q4_K_M.gguf
           
       - name: Calculate total size
         id: check-size
