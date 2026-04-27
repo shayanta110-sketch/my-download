@@ -1,0 +1,53 @@
+name: Recompress Release Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'نام تگ Release مورد نظر (مثال: v1.0.0)'
+        required: true
+        default: 'latest'
+      compression_level:
+        description: 'سطح فشرده‌سازی (1-19 | 1=سریع، 19=بیشترین فشردگی)'
+        required: true
+        default: '19'
+
+permissions:
+  contents: write  # برای دانلود و آپلود Asset‌ها
+
+jobs:
+  recompress:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install zstd
+        run: sudo apt-get update && sudo apt-get install -y zstd
+
+      - name: Download all assets from release
+        uses: robinraju/release-downloader@v1.10
+        with:
+          repository: ${{ github.repository }}
+          tag: ${{ github.event.inputs.tag }}
+          out-file-path: "original-assets"
+          extract: false
+          fileName: "*"
+
+      - name: Create compressed archive
+        run: |
+          mkdir -p release-output
+          # فشرده‌سازی تمام فایل‌های دانلود شده (حفظ ساختار پوشه‌ها)
+          tar -cf release.tar -C original-assets .
+          zstd -T0 -${{ github.event.inputs.compression_level }} -o release-output/assets.tar.zst release.tar
+          # ساخت فایل Checksum برای اطمینان از صحت فایل
+          sha256sum release-output/assets.tar.zst > release-output/assets.tar.zst.sha256
+
+      - name: Upload compressed asset to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          files: |
+            release-output/assets.tar.zst
+            release-output/assets.tar.zst.sha256
+          overwrite: true
