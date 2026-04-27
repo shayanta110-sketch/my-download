@@ -18,10 +18,22 @@ jobs:
         run: |
           mkdir -p dist
           echo "Your build artifacts go here" > dist/README.txt
-          
+          # ⚠️ اینجا فایل‌های واقعی build خود را قرار دهید
+          # مثلاً اگر فایل‌های شما در پوشه build/ هستند:
+          # cp -r build/* dist/
+
+      - name: Compress with Zstandard (max compression)
+        run: |
+          sudo apt-get update && sudo apt-get install -y zstd
+          tar -cf dist.tar -C dist/ .
+          zstd -T0 -19 -o release.tar.zst dist.tar
+          sha256sum release.tar.zst > release.tar.zst.sha256
+          # فایل فشرده و checksum را در ریشه قرار می‌دهیم برای آپلود
+
       - name: Create GitHub Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/*
+            release.tar.zst
+            release.tar.zst.sha256
           generate_release_notes: true
