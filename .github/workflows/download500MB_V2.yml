@@ -18,7 +18,7 @@ jobs:
       - name: دانلود مدل از Hugging Face
         id: download
         run: |
-          URL="https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF/resolve/main/bge-reranker-v2-m3-Q6_K.gguf"
+          URL="https://huggingface.co/mradermacher/LLaDA-MoE-7B-A1B-Instruct-TD-i1-GGUF/resolve/main/LLaDA-MoE-7B-A1B-Instruct-TD.i1-Q6_K.gguf"
           FULL_FILE_NAME=$(basename "$URL")
           echo "در حال دانلود: $FULL_FILE_NAME"
           wget --progress=bar:force "$URL" -O "$FULL_FILE_NAME"
