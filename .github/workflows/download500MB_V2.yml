@@ -20,17 +20,14 @@ jobs:
       - name: Download model from Hugging Face
         id: download
         run: |
-          # دانلود فایل با نام اصلی (در اینجا model.gguf، اما هر نامی می‌تواند باشد)
-          wget https://huggingface.co/mradermacher/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored-i1-GGUF/resolve/main/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored.i1-Q4_K_M.gguf -O ./downloaded-model/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored.i1-Q4_K_M.gguf
-          
-          # استخراج نام پایه فایل (بدون مسیر، با حفظ پسوند gguf)
-          BASE_NAME_WITH_EXT=$(basename "./downloaded-model/model.gguf")
-          # حذف پسوند .gguf برای استفاده در نام‌گذاری (اختیاری)
-          BASE_NAME_NO_EXT="${BASE_NAME_WITH_EXT%.gguf}"
-          echo "BASE_NAME_WITH_EXT=$BASE_NAME_WITH_EXT" >> $GITHUB_ENV
-          echo "BASE_NAME_NO_EXT=$BASE_NAME_NO_EXT" >> $GITHUB_ENV
-          echo "نام فایل اصلی: $BASE_NAME_WITH_EXT"
-          echo "نام پایه (بدون پسوند): $BASE_NAME_NO_EXT"
+          URL="https://huggingface.co/mradermacher/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored-i1-GGUF/resolve/main/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored.i1-Q4_K_M.gguf"
+          # دریافت نام فایل از انتهای URL
+          FILE_NAME=$(basename "$URL")
+          echo "⬇️ Downloading: $FILE_NAME"
+          wget "$URL" -O "./downloaded-model/$FILE_NAME"
+          # ذخیره نام اصلی برای استفاده در کل workflow
+          echo "FULL_FILE_NAME=$FILE_NAME" >> $GITHUB_ENV
+          echo "BASE_NAME=${FILE_NAME%.gguf}" >> $GITHUB_ENV
 
       - name: Create a single uncompressed ZIP (store mode, fast)
         run: |
@@ -39,37 +36,35 @@ jobs:
           cd ..
 
       - name: Split into 500MB parts using 7z
+        id: split
         run: |
           7z -v500m a model-part.7z original.zip
           rm original.zip
-          PART_COUNT=$(ls -1 model-part.7z.0* 2>/dev/null | wc -l)
-          echo "PART_COUNT=$PART_COUNT" >> $GITHUB_ENV
+          EXT_COUNT=$(ls -1 model-part.7z.0* 2>/dev/null | wc -l)
+          echo "PART_COUNT=$EXT_COUNT" >> $GITHUB_ENV
 
-      - name: Check integrity before renaming
+      - name: ✅ Integrity check BEFORE renaming (7z test)
         run: |
-          echo "🔄 در حال اعتبارسنجی مجموعه پارتیشن‌ها..."
+          echo "🔍 Checking integrity of all parts..."
           if 7z t model-part.7z.001 > /dev/null 2>&1; then
-            echo "✅ اعتبارسنجی موفق"
+            echo "✅ Integrity check passed: All parts are valid."
           else
-            echo "❌ اعتبارسنجی ناموفق"
+            echo "❌ Integrity check failed. Aborting."
             exit 1
           fi
 
-      - name: Rename parts using base name (format: model.gguf_01.zip)
+      - name: Rename parts in format: model.gguf_01.zip
         run: |
-          # استفاده از نام پایه با پسوند (مثلاً model.gguf)
-          BASE_FULL="${{ env.BASE_NAME_WITH_EXT }}"
-          part_num=1
+          counter=1
           for file in $(ls -v model-part.7z.0* 2>/dev/null); do
-            # ساخت نام جدید: model.gguf_01.zip ، model.gguf_02.zip ، ...
-            printf -v new_name "${BASE_FULL}_%02d.zip" "$part_num"
+            printf -v new_name "${FULL_FILE_NAME}_%02d.zip" "$counter"
             mv "$file" "$new_name"
-            echo "✅ تغییر نام: $file -> $new_name"
-            ((part_num++))
+            echo "✅ Renamed: $file -> $new_name"
+            ((counter++))
           done
 
       - name: List files to upload
-        run: ls -lh ${BASE_NAME_WITH_EXT}_*.zip
+        run: ls -lh ${FULL_FILE_NAME}_*.zip
 
       - name: Create Git tag
         id: tag
@@ -87,18 +82,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.TAG_NAME }}
-          name: "Model Download ${{ github.run_number }} (Verified)"
+          name: "Model Download ${{ github.run_number }}"
           body: |
-            ## 📦 پارتیشن‌های مدل (تأیید شده با 7-Zip)
+            ## 📦 مدل شما با موفقیت دانلود و پارتیشن‌بندی شد.
             
-            فایل اصلی: `${{ env.BASE_NAME_WITH_EXT }}`
+            فایل اصلی: **${{ env.FULL_FILE_NAME }}**
             
-            **روش استخراج:**
-            - همه فایل‌های `${{ env.BASE_NAME_WITH_EXT }}_*.zip` را دانلود کنید.
-            - در ویندوز: روی فایل `${{ env.BASE_NAME_WITH_EXT }}_01.zip` کلیک راست → 7-Zip → Extract Here.
-            - در لینوکس/مک: دستور `7z x ${{ env.BASE_NAME_WITH_EXT }}_01.zip` را اجرا کنید.
-            
-            پس از استخراج، فایل `${{ env.BASE_NAME_WITH_EXT }}` (مدل اصلی) در پوشه ظاهر می‌شود.
-          files: ${{ env.BASE_NAME_WITH_EXT }}_*.zip
+            **راهنمای استخراج:**
+            1. تمام فایل‌های `${{ env.FULL_FILE_NAME }}_*.zip` را در یک پوشه دانلود کنید.
+            2. روی فایل `${{ env.FULL_FILE_NAME }}_01.zip` کلیک راست کرده و `Extract Here` را انتخاب کنید.
+            3. فایل اصلی `${{ env.FULL_FILE_NAME }}` در همان پوشه ظاهر می‌شود.
+          files: ${{ env.FULL_FILE_NAME }}_*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
