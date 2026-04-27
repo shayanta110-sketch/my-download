@@ -17,7 +17,7 @@ jobs:
 
       - name: Download model directly from Hugging Face
         run: |
-          wget https://huggingface.co/CelesteImperia/Gemma-4-26B-MoE-GGUF/resolve/main/Gemma-4-26B-MoE-IQ3_M.gguf -O ./downloaded-model/emma-4-26B-MoE-IQ3_M.gguf
+          wget https://huggingface.co/ChiKoi7/VibeCoder-20B-RL1_0-MXFP4_MoE-GGUF/resolve/main/VibeCoder-20b-RL1_0_MXFP4_MOE.gguf -O ./downloaded-model/VibeCoder-20b-RL1_0_MXFP4_MOE.gguf
           
       - name: Calculate total size
         id: check-size
