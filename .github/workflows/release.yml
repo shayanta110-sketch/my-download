@@ -1,36 +1,27 @@
-name: Release
+name: Release Workflow
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
 
 permissions:
   contents: write
 
 jobs:
   release:
-    name: Create Release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build Project
+      - name: Prepare release files
         run: |
           mkdir -p dist
-          echo "build version: ${GITHUB_REF_NAME}" > dist/version.txt
-
-      - name: Create Archive
-        run: |
-          sudo apt-get update && sudo apt-get install -y zstd
-          tar -cf dist.tar -C dist/ .
-          zstd -T0 -19 -o dist.tar.zst dist.tar
-
-      - name: Create GitHub Release
-        uses: ncipollo/release-action@v1
+          echo "Your build artifacts go here" > dist/README.txt
+          
+      - name: Create GitHub Release and Upload Assets
+        uses: softprops/action-gh-release@v2
         with:
-          artifacts: "dist.tar.zst"
-          generateReleaseNotes: true
-          draft: false
-          prerelease: false
+          files: |
+            dist/*
+          generate_release_notes: true
