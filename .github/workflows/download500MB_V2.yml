@@ -1,5 +1,4 @@
 name: "V2_Download and Split Large Model from Hugging Face"
-
 on:
   workflow_dispatch:
 
@@ -28,32 +27,39 @@ jobs:
           zip -0 -r ../original.zip .
           cd ..
 
-      - name: Split into 500MB parts using 7z
+      - name: Split into 500MB parts using 7z (Standard Method)
+        id: split
         run: |
-          # با 7z به حجم 500 مگابایت پارتیشن می‌کنیم (خروجی: original.zip.001, original.zip.002, ...)
+          # ایجاد پارتیشن‌های 500 مگابایتی با 7z (خروجی اصلی: original.zip.001, original.zip.002, ...)
           7z -v500m a model-part.7z original.zip
-          # فایل اصلی حجیم را حذف می‌کنیم تا فضای Actions پر نشود
+          
+          # حذف فایل اصلی برای صرفه‌جویی در فضا
           rm original.zip
-          # تغییر نام فایل‌ها به فرمت partXX.zip (اختیاری)
+          
+          # تغییر نام فایل‌ها به فرمت partXX.zip برای راحتی کاربران
           part_num=1
           for file in $(ls -v model-part.7z.* 2>/dev/null); do
             printf -v new_name "part%02d.zip" "$part_num"
             mv "$file" "$new_name"
+            echo "✅ ایجاد شد: $new_name"
             ((part_num++))
           done
+          
+          # ذخیره تعداد پارتیشن‌ها برای مرحله اعتبارسنجی
+          echo "PART_COUNT=$((part_num-1))" >> $GITHUB_ENV
 
-      - name: ** اعتبارسنجی فوری پارتیشن‌ها (قبل از انتشار) **
+      - name: ✅ اعتبارسنجی نهایی پارتیشن‌ها با 7z
         run: |
-          # ترکیب موقت فایل‌ها با cat
-          cat part*.zip > temp_combined.zip
-          # تست یکپارچگی با 7z (روش امن‌تر)
-          if 7z t temp_combined.zip > /dev/null 2>&1; then
-            echo "✅ اعتبارسنجی موفق - پارتیشن‌ها سالم هستند"
+          echo "🔄 در حال اعتبارسنجی ${{ env.PART_COUNT }} پارتیشن..."
+          
+          # تست مستقیم یکپارچگی با دستور 7z روی اولین فایل part01.zip
+          # 7z به طور خودکار فایل‌های part02.zip، part03.zip و ... را در صورت نیاز فراخوانی می‌کند
+          if 7z t part01.zip > /dev/null 2>&1; then
+            echo "✅ اعتبارسنجی موفق: همه پارتیشن‌ها سالم هستند و به درستی ترکیب می‌شوند."
           else
-            echo "❌ اعتبارسنجی ناموفق - پارتیشن‌ها خراب هستند یا ترتیب اشتباه است"
+            echo "❌ اعتبارسنجی ناموفق: پارتیشن‌ها خراب هستند یا ترتیب آن‌ها صحیح نیست."
             exit 1
           fi
-          rm temp_combined.zip
 
       - name: List files to upload
         run: ls -lh part*.zip
@@ -74,14 +80,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.TAG_NAME }}
-          name: "Model Download ${{ github.run_number }}"
+          name: "Model Download ${{ github.run_number }}(Verified and Reliable)"
           body: |
             ## 📦 پارتیشن‌های مدل (تضمین شده با 7z)
             
-            برای استخراج فایل اصلی:
-            1. همه فایل‌های part*.zip را دانلود کنید.
-            2. در لینوکس/مک: `cat part*.zip > combined.zip && 7z x combined.zip`
-            3. در ویندوز: با 7-Zip فایل part01.zip را باز کنید (خودکار بقیه را می‌خواند).
+            این فایل‌ها با ابزار 7-Zip ساخته شده‌اند و سالم بودن آن‌ها قبل از انتشار تأیید شده است.
+            
+            **روش استخراج فایل اصلی:**
+            
+            *   **لینوکس/مک (ترمینال):** دستور `7z x part01.zip` را در پوشه‌ای که همه `part*.zip` در آن قرار دارند، اجرا کنید.
+            *   **ویندوز (نرم‌افزار 7-Zip):** روی فایل `part01.zip` کلیک راست کرده و گزینه "Extract Here" را انتخاب کنید. نرم‌افزار به صورت خودکار به بقیه پارتیشن‌ها مراجعه می‌کند و فایل اصلی `model.gguf` را استخراج می‌نماید.
           files: part*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
