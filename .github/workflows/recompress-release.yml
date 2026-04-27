@@ -1,111 +1,103 @@
-name: "🔥 Recompress Releases (Selectively)"
+name: Release Workflow
+
 on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: 'Mode'
-        required: true
-        default: 'single'
-        type: choice
-        options:
-          - single
-          - list
-          - all_limited
-      tag_input:
-        description: 'Single Release: tag name (e.g., model-release-123)'
-        required: false
-        type: string
-      tags_list:
-        description: 'List: comma-separated tags (e.g., tag1,tag2,tag3)'
-        required: false
-        type: string
-      compression_method:
-        description: 'Compression Method'
-        required: true
-        default: '7z'
-        type: choice
-        options:
-          - 7z
-          - packsquash
-permissions:
-  contents: write
+  release:
+    types: [published]  # زمان انتشار نسخه جدید
+
 jobs:
-  prepare:
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 1: ایجاد Release (در صورت انتشار نسخه جدید)
+  # ─────────────────────────────────────────────────────────────────
+  create-release:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
-      - name: Install gh
-        run: |
-          type -p curl >/dev/null || sudo apt update && sudo apt install curl -y
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && sudo apt update && sudo apt install gh -y
-      - id: set-matrix
-        run: |
-          if [ "${{ github.event.inputs.mode }}" = "single" ] && [ -n "${{ github.event.inputs.tag_input }}" ]; then
-            echo "matrix=[\"${{ github.event.inputs.tag_input }}\"]" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.inputs.mode }}" = "list" ] && [ -n "${{ github.event.inputs.tags_list }}" ]; then
-            tags_list=$(echo '${{ github.event.inputs.tags_list }}' | tr ',' '\n' | jq -R -s -c 'split("\n")[:-1]')
-            echo "matrix=$tags_list" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.inputs.mode }}" = "all_limited" ]; then
-            all_tags=$(gh release list --limit 100 --json tagName --jq '.[].tagName' | head -n 5)
-            all_tags_list=$(echo "$all_tags" | jq -R -s -c 'split("\n")[:-1]')
-            echo "matrix=$all_tags_list" >> $GITHUB_OUTPUT
-          else
-            echo "matrix=[]" >> $GITHUB_OUTPUT
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  processing:
-    runs-on: ubuntu-latest
-    needs: [prepare]
-    if: fromJSON(needs.prepare.outputs.matrix) != []
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: ${{ contains(github.ref, '-beta') }}
+          generate_release_notes: true
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 2: ساخت فایل‌های نهایی برای پلتفرم‌های مختلف
+  # ─────────────────────────────────────────────────────────────────
+  build:
+    needs: create-release
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        tag: ${{ fromJSON(needs.prepare.outputs.matrix) }}
-      fail-fast: false
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            artifact_name: myapp-linux
+            asset_name: myapp-linux
+          - os: windows-latest
+            artifact_name: myapp-windows.exe
+            asset_name: myapp-windows.exe
+          - os: macos-latest
+            artifact_name: myapp-macos
+            asset_name: myapp-macos
+
     steps:
-      - name: Install Tools
+      - uses: actions/checkout@v4
+
+      - name: Install UPX
+        uses: crazy-max/ghaction-upx@v4   # آخرین نسخه v4
+        with:
+          version: latest
+          install-only: true
+
+      - name: Build
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jq p7zip-full
-      - name: Fetch Metadata & Download Original ZIP
-        id: fetch_download
+          # کامند build خود را اینجا قرار دهید
+          echo "Building for ${{ runner.os }}"
+
+      - name: Compress with UPX
+        run: upx --best --lzma "${{ matrix.artifact_name }}"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.artifact_name }}
+          compression-level: 6
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 3: فشرده‌سازی نهایی و آپلود در Release
+  # ─────────────────────────────────────────────────────────────────
+  recompress-release:
+    needs: [create-release, build]   # وابستگی به هر دو Job قبلی
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Prepare Release Files
         run: |
-          echo "➡️ Processing: ${{ matrix.tag }}"
-          TAG="${{ matrix.tag }}"
-          ASSET_DATA=$(gh api -H "Accept: application/vnd.github+json" "/repos/${{ github.repository }}/releases/tags/${TAG}" --jq '.assets[0]')
-          URL=$(echo "$ASSET_DATA" | jq -r '.browser_download_url')
-          SHA=$(sha256sum "$TEMP")
-          echo "download_url=$URL" >> $GITHUB_OUTPUT
-          echo "file_name=$FILENAME" >> $GITHUB_OUTPUT
-          echo "original_hash=$TEMP_SHA" >> $GITHUB_OUTPUT
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Recompress (${{ github.event.inputs.compression_method }})
-        id: recompress
+          mkdir -p release/
+          for file in artifacts/*/*; do
+            cp "$file" release/
+          done
+
+      - name: Create Archives
         run: |
-          if [ "${{ github.event.inputs.compression_method }}" = "7z" ]; then
-            7z a -t7z -mx=9 -m0=lzma2 -ms=on -mmt=on recompressed.7z original.zip
-          elif [ "${{ github.event.inputs.compression_method }}" = "packsquash" ]; then
-            mkdir temp_pack && unzip -q original.zip -d temp_pack && rm -f original.zip
-            git clone https://github.com/ComunidadAylas/PackSquash.git packsquash_tool
-            cd packsquash_tool && cargo build --release && cd ..
-            ./packsquash_tool/target/release/packsquash temp_pack/ -o recompressed.zip
-            mv recompressed.zip recompressed.7z
-          fi
-          echo "✅ Compression complete."
-      - name: Verify Integrity
-        run: |
-          if [ "${{ github.event.inputs.compression_method }}" = "7z" ]; then
-            7z t recompressed.7z
-          else
-            unzip -t recompressed.7z
-          fi
-      - name: Push New File & Delete Old One
-        run: |
-          gh release upload ${{ matrix.tag }} recompressed.7z --clobber
-          gh release delete-asset ${{ matrix.tag }} "${{ steps.fetch_download.outputs.file_name }}" -y
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # فشرده‌سازی با Zstandard و پشتیبانی از حداکثر نخ‌ها
+          tar -cf release.tar -C release/ .
+          zstd -T0 -19 -o release.tar.zst release.tar
+          sha256sum release.tar.zst > release.tar.zst.sha256
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          files: |
+            release.tar.zst
+            release.tar.zst.sha256
