@@ -5,7 +5,6 @@ on:
     types: [published]
 
 jobs:
-  # Job 1: ایجاد Release
   create-release:
     runs-on: ubuntu-latest
     outputs:
@@ -22,7 +21,6 @@ jobs:
           prerelease: ${{ contains(github.ref, '-beta') }}
           generate_release_notes: true
 
-  # Job 2: ساخت و فشرده‌سازی فایل‌ها برای پلتفرم‌های مختلف
   build:
     needs: create-release
     runs-on: ${{ matrix.os }}
@@ -48,10 +46,10 @@ jobs:
           version: latest
           install-only: true
 
-      - name: Build
+      - name: Build (sample)
         run: |
-          # کامند build خود را اینجا قرار دهید
           echo "Building for ${{ runner.os }}"
+          # اگر فایل اجرایی خاصی دارید، اینجا کامپایل کنید
 
       - name: Compress with UPX
         run: upx --best --lzma "${{ matrix.artifact_name }}"
@@ -61,9 +59,8 @@ jobs:
         with:
           name: ${{ matrix.asset_name }}
           path: ${{ matrix.artifact_name }}
-          compression-level: 9  # افزایش سطح فشرده‌سازی
+          compression-level: 9
 
-  # Job 3: فشرده‌سازی نهایی و آپلود در Release
   recompress-release:
     needs: [create-release, build]
     runs-on: ubuntu-latest
@@ -76,12 +73,7 @@ jobs:
       - name: Prepare Release Files
         run: |
           mkdir -p release/
-          # مسیر دقیق‌تر برای کپی فایل‌ها
-          for file in artifacts/*/*; do
-            if [ -f "$file" ]; then
-              cp "$file" release/
-            fi
-          done
+          find artifacts/ -type f -exec cp {} release/ \;
 
       - name: Install zstd
         run: sudo apt-get update && sudo apt-get install -y zstd
