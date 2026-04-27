@@ -1,4 +1,4 @@
-name: "دانلود و پارتیشن‌بندی تضمینی مدل (نسخه نهایی)"
+name: "دانلود و پارتیشن‌بندی تضمینی مدل (با GitHub CLI)"
 
 on:
   workflow_dispatch:
@@ -58,28 +58,35 @@ jobs:
           echo "sha256sum ${{ env.FULL_FILE_NAME }}" >> checksums.txt
           echo '```' >> checksums.txt
 
-      - name: ساخت Tag معتبر و انتشار در GitHub
+      - name: "🔨 ایجاد Tag و انتشار همزمان با آپلود با GitHub CLI 🚀"
         id: release
         run: |
+          # تعریف Tag یکتا
           TAG_NAME="model-release-${{ github.run_id }}-${{ github.run_number }}"
-          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
-          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG_NAME" -m "رلیز خودکار مدل"
-          git push origin "$TAG_NAME"
+          echo "Tag Name: $TAG_NAME"
+          
+          # 1. دریافت محتوای Release Notes
+          cat > release_notes.md << EOF
+          ## 🚀 مدل با موفقیت دانلود و پارتیشن‌بندی شد.
 
-      - name: انتشار صفحه Release (Draft)
-        id: create_release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.release.outputs.tag_name }}
-          name: "📦 دانلود مدل - ${{ steps.release.outputs.tag_name }}"
-          body: |
-            ## 🚀 مدل با موفقیت دانلود و پارتیشن‌بندی شد.
-            **فایل اصلی:** `${{ env.FULL_FILE_NAME }}`
-            ### نحوه بازسازی فایل اصلی:
-            1. تمام فایل‌های `part_*.zip` را در یک پوشه دانلود کنید.
-            2. در ترمینال (لینوکس، macOS یا WSL ویندوز) دستور زیر را اجرا کنید:
-               ```bash
-               cat part_*.zip > ${{ env.FULL_FILE_NAME }}
+          **فایل اصلی:** \`${{ env.FULL_FILE_NAME }}\`
+
+          ### نحوه بازسازی فایل اصلی:
+          1. تمام فایل‌های \`part_*.zip\` را در یک پوشه دانلود کنید.
+          2. در ترمینال (لینوکس، macOS یا WSL ویندوز) دستور زیر را اجرا کنید:
+             \`\`\`bash
+             cat part_*.zip > ${{ env.FULL_FILE_NAME }}
+             \`\`\`
+          3. فایل اصلی \`${{ env.FULL_FILE_NAME }}\` بازسازی می‌شود.
+
+          ### 🔍 بررسی صحت:
+          - فایل \`checksums.txt\` شامل هش SHA256 تمام قطعات است. پس از بازسازی فایل اصلی می‌توانید صحت آن را با هش اصلی (که در فایل checksums.txt نیامده) مقایسه کنید.
+          EOF
+          
+          # 2. اجرای همزمان دستور gh برای ایجاد و آپلود همه فایل‌ها
+          gh release create "$TAG_NAME" \
+            --title "📦 دانلود مدل - $TAG_NAME" \
+            --notes-file release_notes.md \
+            part_*.zip checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
