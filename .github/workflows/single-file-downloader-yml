@@ -1,0 +1,106 @@
+name: "دانلود و پارتیشن‌بندی یک فایل (مثل نصب‌کننده)"
+
+on:
+  workflow_dispatch:                   # <-- اجرای دستی با امکان وارد کردن URL
+    inputs:                            # <-- == اختیاری == اگر می‌خواهید URL را هنگام اجرا وارد کنید این بخش را فعال کنید
+      file_url:                        #
+        description: 'لینک مستقیم فایل'
+        required: true
+        default: 'https://onecommander.com/OneCommanderSetup3.108.0.0.msi'
+
+jobs:
+  prepare_and_release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: بررسی مخزن
+        uses: actions/checkout@v4
+
+      - name: نصب ابزارهای مورد نیاز
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+
+      - name: دانلود فایل هدف
+        id: download
+        run: |
+          echo "در حال دانلود از: ${{ github.event.inputs.file_url }}"
+          wget --progress=bar:force "${{ github.event.inputs.file_url }}" -O "target_file"
+          FULL_FILE_NAME=$(basename "${{ github.event.inputs.file_url }}")
+          echo "فایل دانلود شده با نام اصلی: $FULL_FILE_NAME"
+          echo "FULL_FILE_NAME=$FULL_FILE_NAME" >> $GITHUB_ENV
+          echo "فایل برای پردازش بعدی به عنوان 'target_file' ذخیره شد."
+
+      - name: ذخیره SHA256 فایل اصلی
+        id: hash_original
+        run: |
+          ORIGINAL_HASH=$(sha256sum target_file | cut -d' ' -f1)
+          echo "ORIGINAL_HASH=$ORIGINAL_HASH" >> $GITHUB_ENV
+          echo "هش فایل اصلی: $ORIGINAL_HASH"
+
+      - name: پارتیشن‌بندی مستقیم فایل
+        run: |
+          split -b 500M --numeric-suffixes=1 -a 2 "target_file" "part_"
+          for file in part_*; do
+            mv "$file" "${file}.zip"
+          done
+          rm -f "target_file"
+          echo "✅ پارتیشن‌بندی انجام شد و فایل اصلی حذف گردید."
+
+      - name: ایجاد فایل checksums.txt استاندارد
+        run: |
+          echo "# Checksums for original file and parts" > checksums.txt
+          echo "# Original file name: ${{ env.FULL_FILE_NAME }}" >> checksums.txt
+          echo "# Original file hash: ${{ env.ORIGINAL_HASH }}" >> checksums.txt
+          echo "" >> checksums.txt
+          sha256sum part_*.zip >> checksums.txt
+          cat checksums.txt
+
+      - name: اعتبارسنجی سریع (اختیاری)
+        run: |
+          cat part_*.zip > temp_combined.file
+          ACTUAL_HASH=$(sha256sum temp_combined.file | awk '{print $1}')
+          if [ "$ACTUAL_HASH" = "${{ env.ORIGINAL_HASH }}" ]; then
+            echo "✅ اعتبارسنجی موفق: هش قطعات ترکیبی با فایل اصلی مطابقت دارد."
+          else
+            echo "❌ خطا: هش قطعات ترکیبی با فایل اصلی همخوانی ندارد!"
+            exit 1
+          fi
+          rm temp_combined.file
+
+      - name: آماده‌سازی متن رلیز
+        run: |
+          cat > release_notes.md << EOF
+          ## 📦 بسته دانلودی: ${{ env.FULL_FILE_NAME }}
+
+          **هش SHA256 فایل اصلی:**
+          \`\`\`
+          ${{ env.ORIGINAL_HASH }}
+          \`\`\`
+
+          ### نحوه بازسازی فایل اصلی:
+          1. تمام فایل‌های \`part_*.zip\` را در یک پوشه دانلود کنید.
+          2. در ترمینال (لینوکس، macOS یا WSL ویندوز) دستور زیر را اجرا کنید:
+             \`\`\`bash
+             cat part_*.zip > ${{ env.FULL_FILE_NAME }}
+             \`\`\`
+          3. فایل اصلی \`${{ env.FULL_FILE_NAME }}\` بازسازی می‌شود.
+
+          > **نکته:** اعتبارسنجی فایل با دستور \`sha256sum -c checksums.txt\` انجام می‌شود.
+          ...
+
+          EOF
+
+      - name: انتشار در GitHub (با GitHub CLI)
+        id: release
+        run: |
+          TAG_NAME="download-${{ github.run_id }}-${{ github.run_number }}"
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+          gh release create "$TAG_NAME" \
+            --title "دانلود: ${{ env.FULL_FILE_NAME }}" \
+            --notes-file release_notes.md \
+            part_*.zip checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: اعلان موفقیت نهایی
+        run: echo "::notice::✅ انتشار با موفقیت انجام شد. Release در آدرس https://github.com/${{ github.repository }}/releases/tag/${{ env.TAG_NAME }} ایجاد گردید."
