@@ -17,7 +17,7 @@ jobs:
 
       - name: Download model directly from Hugging Face
         run: |
-          wget https://huggingface.co/ChiKoi7/VibeCoder-20B-RL1_0-MXFP4_MoE-GGUF/resolve/main/VibeCoder-20b-RL1_0_MXFP4_MOE.gguf -O ./downloaded-model/VibeCoder-20b-RL1_0_MXFP4_MOE.gguf
+          wget https://huggingface.co/Brunobkr/OFFELLIA-FNORD-LFM2-24B-A2B-heretic-ara-MXFP4-MOE/resolve/main/%CE%A9FF%CE%A3LLI%CE%B1_FNORD_LFM2-24B-A2B-heretic-ara_MXFP4_MOE.gguf -O ./downloaded-model/Brunobkr_OFFELLIA-FNORD-LFM2-24B-A2B-heretic-ara-MXFP4-MOE.gguf
           
       - name: Calculate total size
         id: check-size
