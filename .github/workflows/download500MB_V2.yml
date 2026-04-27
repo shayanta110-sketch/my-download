@@ -26,9 +26,7 @@ jobs:
 
       - name: پارتیشن‌بندی فایل به قطعات 500 مگابایتی (بدون تغییر محتوا)
         run: |
-          # استفاده از split استاندارد لینوکس برای تقسیم فایل به قطعات 500MB
           split -b 500M -d "${{ env.FULL_FILE_NAME }}" "part_"
-          # تغییر نام قطعات به فرمت part_00.zip, part_01.zip, ...
           for file in part_*; do
             part_number=${file#part_}
             mv "$file" "part_${part_number}.zip"
@@ -36,9 +34,7 @@ jobs:
 
       - name: اعتبارسنجی صحت قطعات (مقایسه SHA256 با فایل اصلی)
         run: |
-          # ترکیب موقت قطعات با cat
           cat part_*.zip > temp_combined.file
-          # محاسبه SHA256 فایل اصلی و مقایسه با فایل ترکیبی
           echo "$(sha256sum ${{ env.FULL_FILE_NAME }} | cut -d ' ' -f1)  temp_combined.file" | sha256sum -c -
           if [ $? -eq 0 ]; then
             echo "✅ اعتبارسنجی موفق: قطعات به درستی ساخته شده‌اند."
@@ -65,26 +61,23 @@ jobs:
       - name: ساخت Tag معتبر و انتشار در GitHub
         id: release
         run: |
-          # ساخت نام Tag با استفاده از run_id و run_number (بدون کاراکترهای غیرمجاز)
           TAG_NAME="model-release-${{ github.run_id }}-${{ github.run_number }}"
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG_NAME" -m "رلیز خودکار مدل"
           git push origin "$TAG_NAME"
 
-      - name: آپلود قطعات و فایل checksums به GitHub Release
+      - name: انتشار صفحه Release (Draft)
+        id: create_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release.outputs.tag_name }}
           name: "📦 دانلود مدل - ${{ steps.release.outputs.tag_name }}"
           body: |
             ## 🚀 مدل با موفقیت دانلود و پارتیشن‌بندی شد.
-
             **فایل اصلی:** `${{ env.FULL_FILE_NAME }}`
-
             ### نحوه بازسازی فایل اصلی:
             1. تمام فایل‌های `part_*.zip` را در یک پوشه دانلود کنید.
             2. در ترمینال (لینوکس، macOS یا WSL ویندوز) دستور زیر را اجرا کنید:
