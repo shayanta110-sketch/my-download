@@ -18,7 +18,7 @@ jobs:
       - name: دانلود مدل از Hugging Face
         id: download
         run: |
-          URL="https://huggingface.co/ChiKoi7/VibeCoder-20B-RL1_0-MXFP4_MoE-GGUF/resolve/main/VibeCoder-20b-RL1_0_MXFP4_MOE.gguf"
+          URL="https://huggingface.co/noctrex/SmallThinker-4B-A0.6B-Instruct-MXFP4_MOE-GGUF/resolve/main/SmallThinker-4BA0.6B-Instruct-i1-MXFP4_MOE.gguf"
           FULL_FILE_NAME=$(basename "$URL")
           echo "در حال دانلود: $FULL_FILE_NAME"
           wget --progress=bar:force "$URL" -O "$FULL_FILE_NAME"
@@ -33,30 +33,26 @@ jobs:
 
       - name: پارتیشن‌بندی مستقیم فایل (بدون ZIP واسطه)
         run: |
-          # تقسیم فایل اصلی به قطعات 500 مگابایتی
           split -b 500M -d "${{ env.FULL_FILE_NAME }}" "part_"
-          # تغییر نام قطعات به فرمت part_00.zip, part_01.zip, ...
           for file in part_*; do
             part_number=${file#part_}
             mv "$file" "part_${part_number}.zip"
           done
-          # حذف فایل اصلی برای آزادسازی فضا
           rm -f "${{ env.FULL_FILE_NAME }}"
           echo "✅ پارتیشن‌بندی انجام شد و فایل اصلی حذف گردید."
 
-      - name: ایجاد فایل checksums.txt کامل (با هش فایل اصلی)
+      - name: ایجاد فایل checksums.txt استاندارد (برای sha256sum -c)
         run: |
-          echo "### 🔐 Checksums for original file and parts" > checksums.txt
-          echo "# Original file (deleted after splitting)" >> checksums.txt
-          echo "${{ env.ORIGINAL_HASH }}  ${{ env.FULL_FILE_NAME }}" >> checksums.txt
+          echo "# Checksums for original file and parts" > checksums.txt
+          echo "# Format: sha256sum -c checksums.txt" >> checksums.txt
           echo "" >> checksums.txt
-          echo "# SHA256 of each part (part_00.zip ...)" >> checksums.txt
+          echo "${{ env.ORIGINAL_HASH }}  ${{ env.FULL_FILE_NAME }}" >> checksums.txt
           sha256sum part_*.zip >> checksums.txt
-          echo "✅ فایل checksums.txt ایجاد شد."
+          echo "✅ فایل checksums.txt در فرمت استاندارد ایجاد شد."
+          cat checksums.txt
 
       - name: (اختیاری) اعتبارسنجی سریع با استفاده از هش ذخیره‌شده
         run: |
-          # ترکیب موقت قطعات و مقایسه با هش اصلی
           cat part_*.zip > temp_combined.file
           ACTUAL_HASH=$(sha256sum temp_combined.file | cut -d' ' -f1)
           if [ "$ACTUAL_HASH" = "${{ env.ORIGINAL_HASH }}" ]; then
@@ -89,7 +85,7 @@ jobs:
           
           ### بررسی صحت:
           - فایل \`checksums.txt\` شامل هش فایل اصلی و هش تک‌تک قطعات است.
-          - پس از بازسازی، می‌توانید با دستور \`sha256sum ${{ env.FULL_FILE_NAME }}\` هش را محاسبه کرده و با مقدار بالا مقایسه کنید.
+          - برای بررسی خودکار: \`sha256sum -c checksums.txt\`
           EOF
 
       - name: انتشار در GitHub با استفاده از GitHub CLI
