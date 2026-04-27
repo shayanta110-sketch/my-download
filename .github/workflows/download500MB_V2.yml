@@ -17,10 +17,8 @@ jobs:
 
       - name: Download model directly from Hugging Face
         run: |
-          wget https://huggingface.co/mradermacher/PsychoCounsel-Llama3-8B-GGUF/resolve/main/PsychoCounsel-Llama3-8B.Q5_K_M.gguf -O ./downloaded-model/PsychoCounsel-Llama3-8B.Q5_K_M.gguf
-          wget https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q8_0.gguf -O ./downloaded-model/SmolLM2-135M-Instruct-Q8_0.gguf
-          wget https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF/resolve/main/bge-reranker-v2-m3-Q6_K.gguf -O ./downloaded-model/bge-reranker-v2-m3-Q6_K.gguf
-
+          wget https://huggingface.co/CelesteImperia/Gemma-4-26B-MoE-GGUF/resolve/main/Gemma-4-26B-MoE-IQ3_M.gguf -O ./downloaded-model/emma-4-26B-MoE-IQ3_M.gguf
+          
       - name: Calculate total size
         id: check-size
         run: |
