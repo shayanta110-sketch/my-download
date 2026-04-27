@@ -17,7 +17,7 @@ jobs:
 
       - name: Download model directly from Hugging Face
         run: |
-          wget https://huggingface.co/Brunobkr/OFFELLIA-FNORD-LFM2-24B-A2B-heretic-ara-MXFP4-MOE/resolve/main/%CE%A9FF%CE%A3LLI%CE%B1_FNORD_LFM2-24B-A2B-heretic-ara_MXFP4_MOE.gguf -O ./downloaded-model/Brunobkr_OFFELLIA-FNORD-LFM2-24B-A2B-heretic-ara-MXFP4-MOE.gguf
+          wget https://huggingface.co/noctrex/SmallThinker-4B-A0.6B-Instruct-MXFP4_MOE-GGUF/resolve/main/SmallThinker-4BA0.6B-Instruct-i1-MXFP4_MOE.gguf -O ./downloaded-model/SmallThinker-4BA0.6B-Instruct-i1-MXFP4_MOE.gguf
           
       - name: Calculate total size
         id: check-size
