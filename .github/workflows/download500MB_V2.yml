@@ -17,7 +17,7 @@ jobs:
 
       - name: Download model directly from Hugging Face
         run: |
-          wget https://huggingface.co/mradermacher/MoE-Pilot-Align-2.7B-i1-GGUF/resolve/main/MoE-Pilot-Align-2.7B.i1-Q4_K_M.gguf -O ./downloaded-model/MoE-Pilot-Align-2.7B.i1-Q4_K_M.gguf
+          wget https://huggingface.co/mradermacher/LLaDA-MoE-7B-A1B-Instruct-TD-i1-GGUF/resolve/main/LLaDA-MoE-7B-A1B-Instruct-TD.i1-Q6_K.gguf -O ./downloaded-model/LLaDA-MoE-7B-A1B-Instruct-TD.i1-Q6_K.gguf
           
       - name: Calculate total size
         id: check-size
