@@ -18,7 +18,7 @@ jobs:
       - name: دانلود مدل از Hugging Face
         id: download
         run: |
-          URL="https://huggingface.co/CelesteImperia/Gemma-4-26B-MoE-GGUF/resolve/main/Gemma-4-26B-MoE-IQ3_M.gguf"
+          URL="https://huggingface.co/mradermacher/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored-i1-GGUF/resolve/main/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored.i1-Q4_K_M.gguf"
           FULL_FILE_NAME=$(basename "$URL")
           echo "در حال دانلود: $FULL_FILE_NAME"
           wget --progress=bar:force "$URL" -O "$FULL_FILE_NAME"
@@ -33,32 +33,30 @@ jobs:
 
       - name: پارتیشن‌بندی مستقیم فایل (بدون ZIP واسطه)
         run: |
-          # تقسیم فایل اصلی به قطعات 500MB
+          # تقسیم فایل اصلی به قطعات 500 مگابایتی
           split -b 500M -d "${{ env.FULL_FILE_NAME }}" "part_"
           # تغییر نام قطعات به فرمت part_00.zip, part_01.zip, ...
           for file in part_*; do
             part_number=${file#part_}
             mv "$file" "part_${part_number}.zip"
           done
-          # حذف فایل اصلی برای آزادسازی فضا (مهم)
+          # حذف فایل اصلی برای آزادسازی فضا
           rm -f "${{ env.FULL_FILE_NAME }}"
           echo "✅ پارتیشن‌بندی انجام شد و فایل اصلی حذف گردید."
 
       - name: ایجاد فایل checksums.txt کامل (با هش فایل اصلی)
         run: |
-          cat > checksums.txt << EOF
-          ### 🔐 Checksums for original file and parts
-          # Original file (deleted after splitting)
-          ${{ env.ORIGINAL_HASH }}  ${{ env.FULL_FILE_NAME }}
-
-          # SHA256 of each part (part_00.zip ...)
-          $(sha256sum part_*.zip)
-          EOF
+          echo "### 🔐 Checksums for original file and parts" > checksums.txt
+          echo "# Original file (deleted after splitting)" >> checksums.txt
+          echo "${{ env.ORIGINAL_HASH }}  ${{ env.FULL_FILE_NAME }}" >> checksums.txt
+          echo "" >> checksums.txt
+          echo "# SHA256 of each part (part_00.zip ...)" >> checksums.txt
+          sha256sum part_*.zip >> checksums.txt
           echo "✅ فایل checksums.txt ایجاد شد."
 
       - name: (اختیاری) اعتبارسنجی سریع با استفاده از هش ذخیره‌شده
         run: |
-          # برای اطمینان بیشتر: یک بار قطعات را موقتاً ترکیب کرده و با هش اصلی مقایسه می‌کنیم
+          # ترکیب موقت قطعات و مقایسه با هش اصلی
           cat part_*.zip > temp_combined.file
           ACTUAL_HASH=$(sha256sum temp_combined.file | cut -d' ' -f1)
           if [ "$ACTUAL_HASH" = "${{ env.ORIGINAL_HASH }}" ]; then
@@ -69,17 +67,42 @@ jobs:
           fi
           rm temp_combined.file
 
+      - name: آماده‌سازی متن رلیز (Release Notes)
+        run: |
+          cat > release_notes.md << EOF
+          ## 📦 مدل با موفقیت دانلود و پارتیشن‌بندی شد.
+          
+          **فایل اصلی:** \`${{ env.FULL_FILE_NAME }}\`
+          
+          **هش SHA256 فایل اصلی:**
+          \`\`\`
+          ${{ env.ORIGINAL_HASH }}
+          \`\`\`
+          
+          ### نحوه بازسازی فایل اصلی:
+          1. تمام فایل‌های \`part_*.zip\` را در یک پوشه دانلود کنید.
+          2. در ترمینال (لینوکس، macOS یا WSL ویندوز) دستور زیر را اجرا کنید:
+             \`\`\`bash
+             cat part_*.zip > ${{ env.FULL_FILE_NAME }}
+             \`\`\`
+          3. فایل اصلی \`${{ env.FULL_FILE_NAME }}\` بازسازی می‌شود.
+          
+          ### بررسی صحت:
+          - فایل \`checksums.txt\` شامل هش فایل اصلی و هش تک‌تک قطعات است.
+          - پس از بازسازی، می‌توانید با دستور \`sha256sum ${{ env.FULL_FILE_NAME }}\` هش را محاسبه کرده و با مقدار بالا مقایسه کنید.
+          EOF
+
       - name: انتشار در GitHub با استفاده از GitHub CLI
         id: release
         run: |
           TAG_NAME="model-release-${{ github.run_id }}-${{ github.run_number }}"
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
           gh release create "$TAG_NAME" \
-            --title "📦 مدل پارتیشن‌بندی شده - $TAG_NAME" \
-            --notes "فایل اصلی به قطعات 500MB تقسیم شده است.\n\n**هش فایل اصلی:** \`${{ env.ORIGINAL_HASH }}\`\n\n**بازسازی:**\n\`\`\`bash\ncat part_*.zip > ${{ env.FULL_FILE_NAME }}\n\`\`\`\n\n**بررسی صحت:**\n\`\`\`bash\nsha256sum ${{ env.FULL_FILE_NAME }}\n\`\`\`\n(باید با هش بالا یکی باشد)" \
+            --title "دانلود مدل - $TAG_NAME" \
+            --notes-file release_notes.md \
             part_*.zip checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: اعلان موفقیت نهایی
-        run: echo "::notice::✅ تمام مراحل با موفقیت انجام شد. Release در آدرس زیر ایجاد گردید: https://github.com/${{ github.repository }}/releases/tag/${{ env.TAG_NAME }}"
+        run: echo "::notice::✅ تمام مراحل با موفقیت انجام شد. Release در آدرس https://github.com/${{ github.repository }}/releases/tag/${{ env.TAG_NAME }} ایجاد گردید."
