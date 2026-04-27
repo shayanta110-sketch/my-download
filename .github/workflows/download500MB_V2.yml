@@ -18,8 +18,19 @@ jobs:
         run: mkdir -p ./downloaded-model
 
       - name: Download model from Hugging Face
+        id: download
         run: |
-          wget https://huggingface.co/mradermacher/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored-i1-GGUF/resolve/main/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored.i1-Q4_K_M.gguf -O ./downloaded-model/model.gguf
+          # دانلود فایل با نام اصلی (در اینجا model.gguf، اما هر نامی می‌تواند باشد)
+          wget https://huggingface.co/mradermacher/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored-i1-GGUF/resolve/main/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored.i1-Q4_K_M.gguf -O ./downloaded-model/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored.i1-Q4_K_M.gguf
+          
+          # استخراج نام پایه فایل (بدون مسیر، با حفظ پسوند gguf)
+          BASE_NAME_WITH_EXT=$(basename "./downloaded-model/model.gguf")
+          # حذف پسوند .gguf برای استفاده در نام‌گذاری (اختیاری)
+          BASE_NAME_NO_EXT="${BASE_NAME_WITH_EXT%.gguf}"
+          echo "BASE_NAME_WITH_EXT=$BASE_NAME_WITH_EXT" >> $GITHUB_ENV
+          echo "BASE_NAME_NO_EXT=$BASE_NAME_NO_EXT" >> $GITHUB_ENV
+          echo "نام فایل اصلی: $BASE_NAME_WITH_EXT"
+          echo "نام پایه (بدون پسوند): $BASE_NAME_NO_EXT"
 
       - name: Create a single uncompressed ZIP (store mode, fast)
         run: |
@@ -27,42 +38,38 @@ jobs:
           zip -0 -r ../original.zip .
           cd ..
 
-      - name: Split into 500MB parts using 7z (Standard Method)
-        id: split
+      - name: Split into 500MB parts using 7z
         run: |
-          # ایجاد پارتیشن‌های 500 مگابایتی با 7z (خروجی اصلی: original.zip.001, original.zip.002, ...)
           7z -v500m a model-part.7z original.zip
-          
-          # حذف فایل اصلی برای صرفه‌جویی در فضا
           rm original.zip
-          
-          # تغییر نام فایل‌ها به فرمت partXX.zip برای راحتی کاربران
-          part_num=1
-          for file in $(ls -v model-part.7z.* 2>/dev/null); do
-            printf -v new_name "part%02d.zip" "$part_num"
-            mv "$file" "$new_name"
-            echo "✅ ایجاد شد: $new_name"
-            ((part_num++))
-          done
-          
-          # ذخیره تعداد پارتیشن‌ها برای مرحله اعتبارسنجی
-          echo "PART_COUNT=$((part_num-1))" >> $GITHUB_ENV
+          PART_COUNT=$(ls -1 model-part.7z.0* 2>/dev/null | wc -l)
+          echo "PART_COUNT=$PART_COUNT" >> $GITHUB_ENV
 
-      - name: ✅ اعتبارسنجی نهایی پارتیشن‌ها با 7z
+      - name: Check integrity before renaming
         run: |
-          echo "🔄 در حال اعتبارسنجی ${{ env.PART_COUNT }} پارتیشن..."
-          
-          # تست مستقیم یکپارچگی با دستور 7z روی اولین فایل part01.zip
-          # 7z به طور خودکار فایل‌های part02.zip، part03.zip و ... را در صورت نیاز فراخوانی می‌کند
-          if 7z t part01.zip > /dev/null 2>&1; then
-            echo "✅ اعتبارسنجی موفق: همه پارتیشن‌ها سالم هستند و به درستی ترکیب می‌شوند."
+          echo "🔄 در حال اعتبارسنجی مجموعه پارتیشن‌ها..."
+          if 7z t model-part.7z.001 > /dev/null 2>&1; then
+            echo "✅ اعتبارسنجی موفق"
           else
-            echo "❌ اعتبارسنجی ناموفق: پارتیشن‌ها خراب هستند یا ترتیب آن‌ها صحیح نیست."
+            echo "❌ اعتبارسنجی ناموفق"
             exit 1
           fi
 
+      - name: Rename parts using base name (format: model.gguf_01.zip)
+        run: |
+          # استفاده از نام پایه با پسوند (مثلاً model.gguf)
+          BASE_FULL="${{ env.BASE_NAME_WITH_EXT }}"
+          part_num=1
+          for file in $(ls -v model-part.7z.0* 2>/dev/null); do
+            # ساخت نام جدید: model.gguf_01.zip ، model.gguf_02.zip ، ...
+            printf -v new_name "${BASE_FULL}_%02d.zip" "$part_num"
+            mv "$file" "$new_name"
+            echo "✅ تغییر نام: $file -> $new_name"
+            ((part_num++))
+          done
+
       - name: List files to upload
-        run: ls -lh part*.zip
+        run: ls -lh ${BASE_NAME_WITH_EXT}_*.zip
 
       - name: Create Git tag
         id: tag
@@ -80,16 +87,18 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.TAG_NAME }}
-          name: "Model Download ${{ github.run_number }}(Verified and Reliable)"
+          name: "Model Download ${{ github.run_number }} (Verified)"
           body: |
-            ## 📦 پارتیشن‌های مدل (تضمین شده با 7z)
+            ## 📦 پارتیشن‌های مدل (تأیید شده با 7-Zip)
             
-            این فایل‌ها با ابزار 7-Zip ساخته شده‌اند و سالم بودن آن‌ها قبل از انتشار تأیید شده است.
+            فایل اصلی: `${{ env.BASE_NAME_WITH_EXT }}`
             
-            **روش استخراج فایل اصلی:**
+            **روش استخراج:**
+            - همه فایل‌های `${{ env.BASE_NAME_WITH_EXT }}_*.zip` را دانلود کنید.
+            - در ویندوز: روی فایل `${{ env.BASE_NAME_WITH_EXT }}_01.zip` کلیک راست → 7-Zip → Extract Here.
+            - در لینوکس/مک: دستور `7z x ${{ env.BASE_NAME_WITH_EXT }}_01.zip` را اجرا کنید.
             
-            *   **لینوکس/مک (ترمینال):** دستور `7z x part01.zip` را در پوشه‌ای که همه `part*.zip` در آن قرار دارند، اجرا کنید.
-            *   **ویندوز (نرم‌افزار 7-Zip):** روی فایل `part01.zip` کلیک راست کرده و گزینه "Extract Here" را انتخاب کنید. نرم‌افزار به صورت خودکار به بقیه پارتیشن‌ها مراجعه می‌کند و فایل اصلی `model.gguf` را استخراج می‌نماید.
-          files: part*.zip
+            پس از استخراج، فایل `${{ env.BASE_NAME_WITH_EXT }}` (مدل اصلی) در پوشه ظاهر می‌شود.
+          files: ${{ env.BASE_NAME_WITH_EXT }}_*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
