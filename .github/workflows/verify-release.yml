@@ -1,4 +1,4 @@
-name: اعتبارسنجی ZIP چندقسمتی (بدون نیاز به چک‌سام)
+name: اعتبارسنجی قطعات چندقسمتی (روش split + SHA256)
 
 on:
   workflow_dispatch:
@@ -37,29 +37,59 @@ jobs:
             curl -L -O "$url"
           done < ../urls.txt
 
-      - name: ترکیب فایل‌های part
+      - name: ترکیب قطعات با cat
         run: |
           cd parts
-          # مرتب‌سازی بر اساس نام عددی (part1, part2, part10)
-          ls part*.zip 2>/dev/null | sort -V | xargs cat > combined.zip
-          if [ ! -f combined.zip ]; then
+          # مرتب‌سازی عددی (part_00.zip, part_01.zip, ...)
+          ls part_*.zip 2>/dev/null | sort -V | xargs cat > combined.file
+          if [ ! -f combined.file ]; then
             echo "❌ ترکیب ناموفق"
             exit 1
           fi
-          echo "✅ combined.zip ساخته شد"
+          echo "✅ combined.file ساخته شد (حجم: $(stat -c%s combined.file) بایت)"
+          # محاسبه SHA256 فایل ترکیبی
+          ACTUAL_SHA=$(sha256sum combined.file | cut -d' ' -f1)
+          echo "ACTUAL_SHA=$ACTUAL_SHA" >> $GITHUB_ENV
+          mv combined.file ../
 
-      - name: تست یکپارچگی فایل ZIP نهایی
+      - name: جستجوی فایل checksums.txt در Assets
         run: |
-          cd parts
-          if unzip -tq combined.zip > /dev/null 2>&1; then
-            echo "✅ تست یکپارچگی PASSED"
+          if grep -q "checksums.txt" urls.txt; then
+            echo "CHECKSUMS_EXISTS=true" >> $GITHUB_ENV
+            # دانلود فایل checksums.txt
+            CHECKSUM_URL=$(grep "checksums.txt" urls.txt | head -1)
+            curl -L -o checksums.txt "$CHECKSUM_URL"
           else
-            echo "❌ تست یکپارچگی FAILED - فایل ZIP خراب است"
-            exit 1
+            echo "CHECKSUMS_EXISTS=false" >> $GITHUB_ENV
           fi
 
-      - name: پاکسازی فایل‌های موقتی
-        run: rm -rf parts
+      - name: مقایسه SHA256 با مقدار مرجع
+        if: env.CHECKSUMS_EXISTS == 'true'
+        run: |
+          # استخراج SHA256 فایل اصلی از checksums.txt (فرض: فایل اصلی نامش در آن هست)
+          ORIGINAL_SHA=$(grep -E "combined.file|original" checksums.txt | head -1 | cut -d' ' -f1)
+          if [ -z "$ORIGINAL_SHA" ]; then
+            echo "⚠️ مقدار مرجع برای فایل اصلی در checksums.txt یافت نشد"
+          else
+            if [ "$ACTUAL_SHA" = "$ORIGINAL_SHA" ]; then
+              echo "✅ اعتبارسنجی کامل: فایل اصلی سالم است."
+            else
+              echo "❌ خطا: SHA256 مطابقت ندارد. فایل خراب است."
+              echo "   مقدار مورد انتظار: $ORIGINAL_SHA"
+              echo "   مقدار محاسبه شده: $ACTUAL_SHA"
+              exit 1
+            fi
+          fi
 
-      - name: گزارش موفقیت
-        run: echo "::notice::✅ همه فایل‌ها سالم هستند و ZIP به درستی ترکیب می‌شود"
+      - name: گزارش در صورت نبود checksums.txt
+        if: env.CHECKSUMS_EXISTS == 'false'
+        run: |
+          echo "::warning::⚠️ فایل checksums.txt در Release وجود ندارد. فقط ترکیب قطعات بررسی شد، اما صحت محتوا تأیید نشد."
+          echo "✅ قطعات با موفقیت دانلود و ترکیب شدند. فایل combined.file در این اجرا ساخته شد."
+
+      - name: پاکسازی فایل‌های موقتی
+        run: rm -rf parts combined.file checksums.txt
+
+      - name: گزارش موفقیت نهایی
+        if: success()
+        run: echo "::notice::✅ فرآیند اعتبارسنجی با موفقیت به پایان رسید."
