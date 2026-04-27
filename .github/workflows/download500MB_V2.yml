@@ -1,4 +1,5 @@
-name: "دانلود و پارتیشن‌بندی تضمینی مدل"
+name: "دانلود و پارتیشن‌بندی تضمینی مدل (نسخه نهایی)"
+
 on:
   workflow_dispatch:
 
@@ -8,59 +9,84 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: بررسی مخزن (Checkout)
+        uses: actions/checkout@v4
 
-      - name: نصب ابزار ضروری
+      - name: نصب ابزارهای مورد نیاز
         run: sudo apt-get update && sudo apt-get install -y p7zip-full
 
-      - name: دانلود مدل (نام فایل از URL استخراج می‌شود)
+      - name: دانلود مدل از Hugging Face (استخراج خودکار نام فایل)
         id: download
         run: |
           URL="https://huggingface.co/mradermacher/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored-i1-GGUF/resolve/main/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored.i1-Q4_K_M.gguf"
-          FULL_FILE_NAME=$(basename "$URL")  # مثل: Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored.i1-Q4_K_M.gguf
+          FULL_FILE_NAME=$(basename "$URL")
+          echo "در حال دانلود: $FULL_FILE_NAME"
           wget "$URL" -O "$FULL_FILE_NAME"
           echo "FULL_FILE_NAME=$FULL_FILE_NAME" >> $GITHUB_ENV
 
-      - name: پارتیشن‌بندی فایل به قطعات 500 مگابایتی
+      - name: پارتیشن‌بندی فایل به قطعات 500 مگابایتی (بدون تغییر محتوا)
         run: |
-          # با دستور split، فایل رو به قطعات 500 مگابایتی تقسیم کن
-          # خروجی: part_aa, part_ab, part_ac, ...
+          # استفاده از split استاندارد لینوکس برای تقسیم فایل به قطعات 500MB
           split -b 500M -d "${{ env.FULL_FILE_NAME }}" "part_"
-          
-          # تغییر نام قطعات به فرمت دلخواه (part_00.zip, part_01.zip, ...)
+          # تغییر نام قطعات به فرمت part_00.zip, part_01.zip, ...
           for file in part_*; do
             part_number=${file#part_}
             mv "$file" "part_${part_number}.zip"
           done
 
-      - name: صحت سنجی نهایی (اختیاری اما مفید)
+      - name: اعتبارسنجی صحت قطعات (مقایسه SHA256 با فایل اصلی)
         run: |
-          # یک فایل موقت از ترکیب قطعات بساز
+          # ترکیب موقت قطعات با cat
           cat part_*.zip > temp_combined.file
-          # SHA256 فایل اصلی و فایل موقت رو مقایسه کن
-          echo "$(sha256sum ${{ env.FULL_FILE_NAME }} | cut -d ' ' -f1) *temp_combined.file" | sha256sum -c -
+          # محاسبه SHA256 فایل اصلی و مقایسه با فایل ترکیبی
+          echo "$(sha256sum ${{ env.FULL_FILE_NAME }} | cut -d ' ' -f1)  temp_combined.file" | sha256sum -c -
           if [ $? -eq 0 ]; then
-            echo "✅ صحت‌سنجی موفق: قطعات به درستی ساخته شده‌اند."
+            echo "✅ اعتبارسنجی موفق: قطعات به درستی ساخته شده‌اند."
           else
-            echo "❌ صحت‌سنجی ناموفق: مشکل در قطعات."
+            echo "❌ اعتبارسنجی ناموفق: مشکل در قطعات."
             exit 1
           fi
           rm temp_combined.file
 
-      - name: ساخت فایل جمع‌بندی (checksums.txt)
+      - name: ایجاد فایل checksums.txt برای کاربران
         run: |
-          echo "### 🛡️ Checksums for parts" > checksums.txt
+          echo "### 🛡️ جمع‌بندی چک‌سام قطعات" > checksums.txt
           echo "" >> checksums.txt
-          echo "\`\`\`" >> checksums.txt
+          echo '```' >> checksums.txt
           sha256sum part_*.zip >> checksums.txt
-          echo "\`\`\`" >> checksums.txt
+          echo '```' >> checksums.txt
+          echo "" >> checksums.txt
+          echo "برای اطمینان از صحت دانلود، پس از ترکیب قطعات با دستور زیر می‌توانید هش را بررسی کنید:" >> checksums.txt
+          echo '```bash' >> checksums.txt
+          echo "cat part_*.zip > ${{ env.FULL_FILE_NAME }}" >> checksums.txt
+          echo "sha256sum ${{ env.FULL_FILE_NAME }}" >> checksums.txt
+          echo '```' >> checksums.txt
 
-      - name: آپلود قطعات به GitHub Release
+      - name: ساخت Tag معتبر و انتشار در GitHub
+        id: release
+        run: |
+          # ساخت نام Tag با استفاده از run_id و run_number (بدون کاراکترهای غیرمجاز)
+          TAG_NAME="model-release-${{ github.run_id }}-${{ github.run_number }}"
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG_NAME" -m "رلیز خودکار مدل"
+          git push origin "$TAG_NAME"
+
+      - name: آپلود قطعات و فایل checksums به GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "Model-Download-${{ github.run_number }}-$(date +'%Y%m%d%H%M%S')"
-          name: "دانلود مدل - اجرا ${{ github.run_number }}"
+          tag_name: ${{ steps.release.outputs.tag_name }}
+          name: "📦 دانلود مدل - ${{ steps.release.outputs.tag_name }}"
           body: |
-            سلام! فایل اصلی با موفقیت دانلود و پارتیشن‌بندی شد.
+            ## 🚀 مدل با موفقیت دانلود و پارتیشن‌بندی شد.
 
-            **فایل اصلی:**
+            **فایل اصلی:** `${{ env.FULL_FILE_NAME }}`
+
+            ### نحوه بازسازی فایل اصلی:
+            1. تمام فایل‌های `part_*.zip` را در یک پوشه دانلود کنید.
+            2. در ترمینال (لینوکس، macOS یا WSL ویندوز) دستور زیر را اجرا کنید:
+               ```bash
+               cat part_*.zip > ${{ env.FULL_FILE_NAME }}
