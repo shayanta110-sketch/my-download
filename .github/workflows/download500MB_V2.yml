@@ -1,4 +1,4 @@
-name: "دانلود مدل و پارتیشن‌بندی مطمئن با 7z"
+name: "V2_Download and Split Large Model from Hugging Face"
 
 on:
   workflow_dispatch:
