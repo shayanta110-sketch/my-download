@@ -1,4 +1,4 @@
-name: "Download Offline Resources for Windows 10"
+name: "Download Offline Resources for Windows 10 (با پارتیشن‌بندی و اعتبارسنجی)"
 
 on:
   workflow_dispatch:
@@ -94,32 +94,69 @@ jobs:
           EOF
           offvsix --file extensions.txt --destination "$vscode_dir" || true
 
-      - name: Create ZIP archive (part01.zip)
+      - name: ایجاد بایگانی ZIP اصلی (بدون فشرده‌سازی) و محاسبه هش
+        id: archive
         run: |
-          rm -f part01.zip
-          zip -r part01.zip ./downloaded-resources/
-          echo "✅ part01.zip created"
-          ls -lh part01.zip
+          # ساخت فایل ZIP اصلی
+          zip -0 -r original_resources.zip ./downloaded-resources/
+          ORIGINAL_HASH=$(sha256sum original_resources.zip | cut -d' ' -f1)
+          echo "ORIGINAL_HASH=$ORIGINAL_HASH" >> $GITHUB_ENV
+          echo "هش فایل ZIP اصلی: $ORIGINAL_HASH"
 
-      - name: Create Git tag
-        id: tag
+      - name: پارتیشن‌بندی در صورت نیاز (بزرگتر از 500MB)
+        run: |
+          FILE_SIZE=$(stat -c%s "original_resources.zip")
+          MAX_SIZE=$((500 * 1024 * 1024))  # 500MB
+          
+          if [ $FILE_SIZE -gt $MAX_SIZE ]; then
+            echo "حجم فایل ZIP اصلی ($FILE_SIZE بایت) بیشتر از 500MB است. پارتیشن‌بندی می‌شود..."
+            split -b 500M --numeric-suffixes=1 -a 2 "original_resources.zip" "part_"
+            # تغییر نام قطعات به فرمت part_01.zip, part_02.zip, ...
+            for file in part_*; do
+              mv "$file" "${file}.zip"
+            done
+            # حذف فایل اصلی برای صرفه‌جویی در فضا
+            rm original_resources.zip
+            echo "PARTITIONED=true" >> $GITHUB_ENV
+          else
+            echo "حجم فایل ZIP اصلی کمتر از 500MB است. بدون پارتیشن آپلود می‌شود."
+            mv original_resources.zip part_01.zip
+            echo "PARTITIONED=false" >> $GITHUB_ENV
+          fi
+
+      - name: ایجاد فایل checksums.txt (فرمت استاندارد)
+        run: |
+          echo "# Checksums for offline resources package" > checksums.txt
+          echo "# Original file hash: ${{ env.ORIGINAL_HASH }}" >> checksums.txt
+          echo "" >> checksums.txt
+          sha256sum part_*.zip >> checksums.txt
+          echo "✅ checksums.txt ایجاد شد:"
+          cat checksums.txt
+
+      - name: اعتبارسنجی سریع (ترکیب و مقایسه در صورت پارتیشن)
+        if: env.PARTITIONED == 'true'
+        run: |
+          cat part_*.zip > temp_combined.zip
+          ACTUAL_HASH=$(sha256sum temp_combined.zip | cut -d' ' -f1)
+          if [ "$ACTUAL_HASH" = "${{ env.ORIGINAL_HASH }}" ]; then
+            echo "✅ اعتبارسنجی موفق: قطعات به درستی ترکیب می‌شوند و هش مطابقت دارد."
+          else
+            echo "❌ خطا: هش قطعات ترکیبی با فایل اصلی همخوانی ندارد!"
+            exit 1
+          fi
+          rm temp_combined.zip
+
+      - name: انتشار با GitHub CLI (آپلود قطعات و checksums.txt)
+        id: release
         run: |
           TAG_NAME="offline-resources-${{ github.run_number }}-$(date +'%Y%m%d%H%M%S')"
-          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG_NAME" -m "Offline Resources for Windows"
-          git push origin "$TAG_NAME"
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+          gh release create "$TAG_NAME" \
+            --title "دانلود منابع آفلاین ویندوز - شماره ${{ github.run_number }}" \
+            --notes "## 📦 منابع آفلاین ویندوز\n\nاین بسته شامل افزونه‌های PyCharm، نرم‌افزارها، کتابخانه‌های پایتون، ابزارها و افزونه‌های VS Code است.\n\n### نحوه بازسازی:\n- اگر فایل‌ها به صورت `part_*.zip` هستند، با دستور زیر ترکیب کنید:\n  ```bash\n  cat part_*.zip > resources.zip\n  unzip resources.zip\n  ```\n- در غیر این صورت، مستقیماً `part_01.zip` را استخراج کنید.\n\n### بررسی صحت:\n- فایل `checksums.txt` شامل هش SHA256 قطعات است.\n- دستور `sha256sum -c checksums.txt` را اجرا کنید." \
+            part_*.zip checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create Release and upload asset with GitHub CLI
-        run: |
-          # ایجاد ریلیز با gh
-          gh release create ${{ steps.tag.outputs.TAG_NAME }} \
-            --title "دانلود منابع آفلاین ویندوز - شماره ${{ github.run_number }}" \
-            --notes "فایل zip شامل افزونه‌ها، نرم‌افزارها، کتابخانه‌های پایتون (ویندوز)، ابزارها و افزونه‌های VS Code. برای استخراج: unzip part01.zip"
-          # آپلود فایل part01.zip
-          gh release upload ${{ steps.tag.outputs.TAG_NAME }} part01.zip --clobber
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: اعلان موفقیت نهایی
+        run: echo "::notice::✅ تمام مراحل با موفقیت انجام شد. Release در آدرس https://github.com/${{ github.repository }}/releases/tag/${{ env.TAG_NAME }} ایجاد گردید."
