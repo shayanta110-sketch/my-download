@@ -10,7 +10,6 @@ on:
       release_tag:
         description: 'نام Tag (مثال: model-release-25008447063-19)'
         required: true
-        default: ''
 
 permissions:
   contents: read
@@ -24,19 +23,13 @@ jobs:
         run: |
           REPO="${{ github.event.inputs.repository }}"
           TAG="${{ github.event.inputs.release_tag }}"
-          if [ -z "$TAG" ]; then
-            echo "❌ لطفاً نام Tag را وارد کنید"
-            exit 1
-          fi
           API_URL="https://api.github.com/repos/${REPO}/releases/tags/${TAG}"
           echo "در حال دریافت اطلاعات از: $API_URL"
           RESPONSE=$(curl -s "$API_URL")
-          # بررسی وجود Release
           if echo "$RESPONSE" | grep -q "Not Found"; then
             echo "❌ Release با Tag '$TAG' در مخزن '$REPO' یافت نشد"
             exit 1
           fi
-          # استخراج لینک دانلود assets
           ASSETS=$(echo "$RESPONSE" | jq -r '.assets[].browser_download_url')
           if [ -z "$ASSETS" ]; then
             echo "❌ هیچ فایلی در این Release وجود ندارد"
@@ -44,12 +37,6 @@ jobs:
           fi
           echo "$ASSETS" > urls.txt
           echo "✅ تعداد فایل‌های موجود: $(cat urls.txt | wc -l)"
-          # ذخیره نام فایل اصلی (اولین فایل با پسوند .gguf یا .bin یا ...) - اختیاری
-          MAIN_FILE_URL=$(echo "$ASSETS" | grep -E '\.(gguf|bin|model)$' | head -1 || true)
-          if [ -n "$MAIN_FILE_URL" ]; then
-            MAIN_FILENAME=$(basename "$MAIN_FILE_URL")
-            echo "MAIN_FILENAME=$MAIN_FILENAME" >> $GITHUB_ENV
-          fi
 
       - name: دانلود تمام فایل‌ها
         run: |
@@ -68,7 +55,7 @@ jobs:
           if [ -f "download_parts/checksums.txt" ]; then
             echo "✅ فایل checksums.txt موجود است"
             echo "CHECKSUM_EXISTS=true" >> $GITHUB_ENV
-            mv download_parts/checksums.txt .
+            cp download_parts/checksums.txt .
           else
             echo "⚠️ فایل checksums.txt در Release وجود ندارد"
             echo "CHECKSUM_EXISTS=false" >> $GITHUB_ENV
@@ -77,7 +64,6 @@ jobs:
       - name: ترکیب قطعات (cat part_*.zip)
         run: |
           cd download_parts
-          # مرتب‌سازی عددی: part_00.zip, part_01.zip, ...
           ls part_*.zip 2>/dev/null | sort -V | xargs cat > combined_file
           if [ ! -f combined_file ]; then
             echo "❌ ترکیب قطعات ناموفق"
@@ -88,40 +74,45 @@ jobs:
           mv combined_file ../
           cd ..
 
-      - name: اعتبارسنجی با استفاده از checksums.txt (در صورت وجود)
+      - name: اعتبارسنجی با استفاده از checksums.txt (فرمت استاندارد)
         if: env.CHECKSUM_EXISTS == 'true'
         run: |
-          # استخراج SHA256 فایل اصلی از checksums.txt
-          ORIGINAL_SHA=$(grep -E "SHA256 of the original file|original file" checksums.txt -A 1 | tail -1 | awk '{print $1}')
-          if [ -z "$ORIGINAL_SHA" ]; then
-            # تلاش برای یافتن هر هش غیر از part_
-            ORIGINAL_SHA=$(grep -v "part_" checksums.txt | grep -E '^[a-f0-9]{64}' | head -1 | awk '{print $1}')
-          fi
-          if [ -z "$ORIGINAL_SHA" ]; then
-            echo "⚠️ هش فایل اصلی در checksums.txt یافت نشد. فقط صحت قطعات بررسی می‌شود."
-            # بررسی هش خود قطعات (اختیاری)
-            cd download_parts
-            sha256sum -c ../checksums.txt --ignore-missing || true
-            cd ..
+          # روش اول: استفاده از دستور استاندارد sha256sum -c
+          # این دستور خطوط کامنت شده (#) را نادیده می‌گیرد
+          if sha256sum -c checksums.txt --ignore-missing 2>/dev/null; then
+            echo "✅ همه هش‌های موجود در checksums.txt تأیید شدند."
           else
-            echo "هش مورد انتظار: $ORIGINAL_SHA"
-            echo "هش محاسبه شده: $ACTUAL_SHA"
+            echo "⚠️ برخی هش‌ها در checksums.txt مطابقت ندارند یا فرمت مشکل دارد."
+          fi
+
+          # استخراج هش فایل اصلی (برای گزارش دقیق)
+          ORIGINAL_SHA=$(grep -v "^#" checksums.txt | grep "${{ env.FULL_FILE_NAME }}" | head -1 | awk '{print $1}')
+          if [ -z "$ORIGINAL_SHA" ]; then
+            # اگر فایل اصلی در checksums.txt نبود (مثلاً فقط هش قطعات باشد)
+            # سعی می‌کنیم اولین هش غیر از part_ را پیدا کنیم
+            ORIGINAL_SHA=$(grep -v "^#" checksums.txt | grep -v "part_" | grep -E '^[a-f0-9]{64}' | head -1 | awk '{print $1}')
+          fi
+
+          if [ -n "$ORIGINAL_SHA" ]; then
+            echo "هش مورد انتظار (از checksums.txt): $ORIGINAL_SHA"
+            echo "هش محاسبه شده (از ترکیب قطعات): $ACTUAL_SHA"
             if [ "$ACTUAL_SHA" = "$ORIGINAL_SHA" ]; then
               echo "✅ اعتبارسنجی کامل: فایل اصلی سالم است و با هش موجود در checksums.txt مطابقت دارد."
             else
-              echo "❌ خطا: SHA256 مطابقت ندارد. فایل خراب است."
+              echo "❌ خطا: SHA256 مطابقت ندارد. فایل اصلی خراب است."
               exit 1
             fi
+          else
+            echo "⚠️ هش فایل اصلی در checksums.txt یافت نشد، اما هش قطعات بررسی شد."
           fi
 
       - name: اعتبارسنجی در صورت نبود checksums.txt (با استفاده از API)
         if: env.CHECKSUM_EXISTS == 'false'
         run: |
-          echo "⚠️ فایل checksums.txt موجود نیست. در حال تلاش برای دریافت هش از GitHub API (در صورت وجود) ..."
+          echo "⚠️ فایل checksums.txt موجود نیست. در حال تلاش برای دریافت هش از GitHub API..."
           REPO="${{ github.event.inputs.repository }}"
           TAG="${{ github.event.inputs.release_tag }}"
           API_URL="https://api.github.com/repos/${REPO}/releases/tags/${TAG}"
-          # برخی از ریلیزها ممکن است شامل digest در assets باشند
           DIGEST=$(curl -s "$API_URL" | jq -r '.assets[] | select(.name | test("part_00|combined")) | .digest' | head -1)
           if [ -n "$DIGEST" ] && [ "$DIGEST" != "null" ]; then
             EXPECTED_SHA=$(echo "$DIGEST" | sed 's/^sha256://')
@@ -133,7 +124,7 @@ jobs:
             fi
           else
             echo "✅ هش فایل ترکیبی (بدون مرجع) محاسبه شد: $ACTUAL_SHA"
-            echo "::notice::توجه:因为没有 checksums.txt و digest، فقط فرآیند ترکیب تأیید شد. برای اطمینان بیشتر، فایل checksums.txt را در Release بعدی اضافه کنید."
+            echo "::notice::توجه: بدون checksums.txt یا digest، فقط فرآیند ترکیب تأیید شد."
           fi
 
       - name: پاکسازی فایل‌های موقتی
