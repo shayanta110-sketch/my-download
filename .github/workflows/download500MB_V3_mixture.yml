@@ -1,4 +1,4 @@
-name: "دانلود دسته‌ای مدل‌ها و پارتیشن‌بندی (نسخه نهایی)"
+name: "دانلود دسته‌ای مدل‌ها و پارتیشن‌بندی (نسخه نهایی - اصلاح شده)"
 
 on:
   workflow_dispatch:
@@ -18,8 +18,9 @@ jobs:
       - name: ایجاد پوشه برای دانلود فایل‌ها
         run: mkdir -p ./downloaded_models
 
-      - name: تعریف تابع دانلود با تأخیر و تلاش مجدد
+      - name: دانلود تمام فایل‌ها با تأخیر بین هر دانلود (تعریف تابع در همان مرحله)
         run: |
+          # تعریف تابع دانلود با دو بار تلاش
           download_file() {
             local url=$1
             local output=$2
@@ -35,15 +36,8 @@ jobs:
             echo "❌ Failed: $output"
             return 1
           }
-          export -f download_file
-          # ذخیره تابع برای استفاده در مرحله بعد
-          declare -f download_file > download_func.sh
-          echo "download_file" >> download_func.sh
-
-      - name: دانلود تمام فایل‌ها با تأخیر بین هر دانلود
-        run: |
-          source download_func.sh
-          # دانلود فایل‌ها مطابق لیست داده شده
+          
+          # فراخوانی دانلود برای هر لینک با فاصله ۲ ثانیه
           download_file "https://huggingface.co/mah92/Khadijah-FA_EN-Matcha-TTS-Model/resolve/main/matcha-fa_en-khadijah-22050-3.onnx" "matcha-fa_en-khadijah-22050-3.onnx"
           sleep 2
           
@@ -94,6 +88,7 @@ jobs:
           
           download_file "https://huggingface.co/afrideva/tinyllama-python-GGUF/resolve/main/tinyllama-python.q6_k.gguf" "tinyllama-python.q6_k.gguf"
 
+      # ادامه مراحل قبلی: ایجاد ZIP، پارتیشن‌بندی، checksums.txt، انتشار
       - name: ایجاد بایگانی ZIP بدون فشرده‌سازی از تمام فایل‌های دانلودی
         id: archive
         run: |
@@ -107,8 +102,7 @@ jobs:
       - name: پارتیشن‌بندی در صورت نیاز (بزرگتر از 500MB)
         run: |
           FILE_SIZE=$(stat -c%s "all_models.zip")
-          MAX_SIZE=$((500 * 1024 * 1024))  # 500MB
-          
+          MAX_SIZE=$((500 * 1024 * 1024))
           if [ $FILE_SIZE -gt $MAX_SIZE ]; then
             echo "حجم فایل ZIP اصلی ($FILE_SIZE بایت) بیشتر از 500MB است. پارتیشن‌بندی می‌شود..."
             split -b 500M --numeric-suffixes=1 -a 2 "all_models.zip" "part_"
@@ -129,7 +123,6 @@ jobs:
           echo "# Original file hash: ${{ env.ORIGINAL_HASH }}" >> checksums.txt
           echo "" >> checksums.txt
           sha256sum part_*.zip >> checksums.txt
-          echo "✅ checksums.txt ایجاد شد:"
           cat checksums.txt
 
       - name: (اختیاری) اعتبارسنجی سریع در صورت پارتیشن‌بندی
@@ -138,7 +131,7 @@ jobs:
           cat part_*.zip > temp_combined.zip
           ACTUAL_HASH=$(sha256sum temp_combined.zip | cut -d' ' -f1)
           if [ "$ACTUAL_HASH" = "${{ env.ORIGINAL_HASH }}" ]; then
-            echo "✅ اعتبارسنجی موفق: قطعات به درستی ترکیب می‌شوند و هش مطابقت دارد."
+            echo "✅ اعتبارسنجی موفق: قطعات به درستی ترکیب می‌شوند."
           else
             echo "❌ خطا: هش قطعات ترکیبی با فایل اصلی همخوانی ندارد!"
             exit 1
@@ -150,30 +143,24 @@ jobs:
           cat > release_notes.md << EOF
           ## 📦 مجموعه مدل‌ها و فایل‌های دانلودی
 
-          این بسته شامل موارد زیر است:
-          - مدل TTS Khadijah
-          - فایل‌های Piper Persian (Mana)
-          - Sherpa ONNX runtime
-          - PaddleOCR-VL
-          - مدل‌های مختلف GGUF (Starcoder2, OLMo, Bling-sheared-llama, Menlo Lucy, LFM2, tiny-summary, stable-code-instruct, tinyllama-python و غیره)
+          این بسته شامل مدل‌های TTS، OCR، LLM و ابزارهای مرتبط است.
 
-          **هش SHA256 فایل ZIP اصلی (قبل از پارتیشن‌بندی):**
+          **هش SHA256 فایل ZIP اصلی:**
           \`\`\`
           ${{ env.ORIGINAL_HASH }}
           \`\`\`
 
-          ### نحوه بازسازی فایل اصلی:
-          1. تمام فایل‌های \`part_*.zip\` را در یک پوشه دانلود کنید.
-          2. در ترمینال (لینوکس، macOS یا WSL ویندوز) دستور زیر را اجرا کنید:
+          ### نحوه بازسازی:
+          1. همه فایل‌های \`part_*.zip\` را دانلود کنید.
+          2. دستور زیر را اجرا کنید:
              \`\`\`bash
              cat part_*.zip > all_models.zip
-             unzip all_models.zip -d extracted_models
+             unzip all_models.zip -d extracted
              \`\`\`
-          3. پوشه \`extracted_models\` شامل همه فایل‌های دانلودی خواهد بود.
+          3. پوشه \`extracted\` شامل همه فایل‌ها است.
 
           ### بررسی صحت:
-          - فایل \`checksums.txt\` شامل هش قطعات است.
-          - برای بررسی خودکار: \`sha256sum -c checksums.txt\`
+          \`sha256sum -c checksums.txt\`
           EOF
 
       - name: انتشار در GitHub با استفاده از GitHub CLI
