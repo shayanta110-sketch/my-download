@@ -1,4 +1,4 @@
-name: "V2_Download and Split Large Model from Hugging Face"
+name: "دانلود و پارتیشن‌بندی تضمینی مدل"
 on:
   workflow_dispatch:
 
@@ -8,90 +8,59 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: نصب 7-Zip
+      - name: نصب ابزار ضروری
         run: sudo apt-get update && sudo apt-get install -y p7zip-full
 
-      - name: Create download directory
-        run: mkdir -p ./downloaded-model
-
-      - name: Download model from Hugging Face
+      - name: دانلود مدل (نام فایل از URL استخراج می‌شود)
         id: download
         run: |
           URL="https://huggingface.co/mradermacher/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored-i1-GGUF/resolve/main/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored.i1-Q4_K_M.gguf"
-          # دریافت نام فایل از انتهای URL
-          FILE_NAME=$(basename "$URL")
-          echo "⬇️ Downloading: $FILE_NAME"
-          wget "$URL" -O "./downloaded-model/$FILE_NAME"
-          # ذخیره نام اصلی برای استفاده در کل workflow
-          echo "FULL_FILE_NAME=$FILE_NAME" >> $GITHUB_ENV
-          echo "BASE_NAME=${FILE_NAME%.gguf}" >> $GITHUB_ENV
+          FULL_FILE_NAME=$(basename "$URL")  # مثل: Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored.i1-Q4_K_M.gguf
+          wget "$URL" -O "$FULL_FILE_NAME"
+          echo "FULL_FILE_NAME=$FULL_FILE_NAME" >> $GITHUB_ENV
 
-      - name: Create a single uncompressed ZIP (store mode, fast)
+      - name: پارتیشن‌بندی فایل به قطعات 500 مگابایتی
         run: |
-          cd downloaded-model
-          zip -0 -r ../original.zip .
-          cd ..
-
-      - name: Split into 500MB parts using 7z
-        id: split
-        run: |
-          7z -v500m a model-part.7z original.zip
-          rm original.zip
-          EXT_COUNT=$(ls -1 model-part.7z.0* 2>/dev/null | wc -l)
-          echo "PART_COUNT=$EXT_COUNT" >> $GITHUB_ENV
-
-      - name: ✅ Integrity check BEFORE renaming (7z test)
-        run: |
-          echo "🔍 Checking integrity of all parts..."
-          if 7z t model-part.7z.001 > /dev/null 2>&1; then
-            echo "✅ Integrity check passed: All parts are valid."
-          else
-            echo "❌ Integrity check failed. Aborting."
-            exit 1
-          fi
-
-      - name: Rename parts in format: model.gguf_01.zip
-        run: |
-          counter=1
-          for file in $(ls -v model-part.7z.0* 2>/dev/null); do
-            printf -v new_name "${FULL_FILE_NAME}_%02d.zip" "$counter"
-            mv "$file" "$new_name"
-            echo "✅ Renamed: $file -> $new_name"
-            ((counter++))
+          # با دستور split، فایل رو به قطعات 500 مگابایتی تقسیم کن
+          # خروجی: part_aa, part_ab, part_ac, ...
+          split -b 500M -d "${{ env.FULL_FILE_NAME }}" "part_"
+          
+          # تغییر نام قطعات به فرمت دلخواه (part_00.zip, part_01.zip, ...)
+          for file in part_*; do
+            part_number=${file#part_}
+            mv "$file" "part_${part_number}.zip"
           done
 
-      - name: List files to upload
-        run: ls -lh ${FULL_FILE_NAME}_*.zip
-
-      - name: Create Git tag
-        id: tag
+      - name: صحت سنجی نهایی (اختیاری اما مفید)
         run: |
-          TAG_NAME="model-download-${{ github.run_number }}-$(date +'%Y%m%d%H%M%S')"
-          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
-          git push origin "$TAG_NAME"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # یک فایل موقت از ترکیب قطعات بساز
+          cat part_*.zip > temp_combined.file
+          # SHA256 فایل اصلی و فایل موقت رو مقایسه کن
+          echo "$(sha256sum ${{ env.FULL_FILE_NAME }} | cut -d ' ' -f1) *temp_combined.file" | sha256sum -c -
+          if [ $? -eq 0 ]; then
+            echo "✅ صحت‌سنجی موفق: قطعات به درستی ساخته شده‌اند."
+          else
+            echo "❌ صحت‌سنجی ناموفق: مشکل در قطعات."
+            exit 1
+          fi
+          rm temp_combined.file
 
-      - name: Create GitHub Release and upload parts
+      - name: ساخت فایل جمع‌بندی (checksums.txt)
+        run: |
+          echo "### 🛡️ Checksums for parts" > checksums.txt
+          echo "" >> checksums.txt
+          echo "\`\`\`" >> checksums.txt
+          sha256sum part_*.zip >> checksums.txt
+          echo "\`\`\`" >> checksums.txt
+
+      - name: آپلود قطعات به GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.TAG_NAME }}
-          name: "Model Download ${{ github.run_number }}"
+          tag_name: "Model-Download-${{ github.run_number }}-$(date +'%Y%m%d%H%M%S')"
+          name: "دانلود مدل - اجرا ${{ github.run_number }}"
           body: |
-            ## 📦 مدل شما با موفقیت دانلود و پارتیشن‌بندی شد.
-            
-            فایل اصلی: **${{ env.FULL_FILE_NAME }}**
-            
-            **راهنمای استخراج:**
-            1. تمام فایل‌های `${{ env.FULL_FILE_NAME }}_*.zip` را در یک پوشه دانلود کنید.
-            2. روی فایل `${{ env.FULL_FILE_NAME }}_01.zip` کلیک راست کرده و `Extract Here` را انتخاب کنید.
-            3. فایل اصلی `${{ env.FULL_FILE_NAME }}` در همان پوشه ظاهر می‌شود.
-          files: ${{ env.FULL_FILE_NAME }}_*.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            سلام! فایل اصلی با موفقیت دانلود و پارتیشن‌بندی شد.
+
+            **فایل اصلی:**
