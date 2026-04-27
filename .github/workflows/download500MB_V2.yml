@@ -18,7 +18,7 @@ jobs:
       - name: دانلود مدل از Hugging Face
         id: download
         run: |
-          URL="https://huggingface.co/CelesteImperia/Gemma-4-26B-MoE-GGUF/resolve/main/Gemma-4-26B-MoE-IQ3_M.gguf"
+          URL="https://huggingface.co/ChiKoi7/VibeCoder-20B-RL1_0-MXFP4_MoE-GGUF/resolve/main/VibeCoder-20b-RL1_0_MXFP4_MOE.gguf"
           FULL_FILE_NAME=$(basename "$URL")
           echo "در حال دانلود: $FULL_FILE_NAME"
           wget --progress=bar:force "$URL" -O "$FULL_FILE_NAME"
