@@ -2,12 +2,10 @@ name: Release Workflow
 
 on:
   release:
-    types: [published]  # زمان انتشار نسخه جدید
+    types: [published]
 
 jobs:
-  # ─────────────────────────────────────────────────────────────────
   # JOB 1: ایجاد Release (در صورت انتشار نسخه جدید)
-  # ─────────────────────────────────────────────────────────────────
   create-release:
     runs-on: ubuntu-latest
     outputs:
@@ -24,9 +22,7 @@ jobs:
           prerelease: ${{ contains(github.ref, '-beta') }}
           generate_release_notes: true
 
-  # ─────────────────────────────────────────────────────────────────
   # JOB 2: ساخت فایل‌های نهایی برای پلتفرم‌های مختلف
-  # ─────────────────────────────────────────────────────────────────
   build:
     needs: create-release
     runs-on: ${{ matrix.os }}
@@ -43,12 +39,11 @@ jobs:
           - os: macos-latest
             artifact_name: myapp-macos
             asset_name: myapp-macos
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Install UPX
-        uses: crazy-max/ghaction-upx@v4   # آخرین نسخه v4
+        uses: crazy-max/ghaction-upx@v4
         with:
           version: latest
           install-only: true
@@ -68,11 +63,9 @@ jobs:
           path: ${{ matrix.artifact_name }}
           compression-level: 6
 
-  # ─────────────────────────────────────────────────────────────────
   # JOB 3: فشرده‌سازی نهایی و آپلود در Release
-  # ─────────────────────────────────────────────────────────────────
   recompress-release:
-    needs: [create-release, build]   # وابستگی به هر دو Job قبلی
+    needs: [create-release, build]
     runs-on: ubuntu-latest
     steps:
       - name: Download Artifacts
@@ -83,8 +76,11 @@ jobs:
       - name: Prepare Release Files
         run: |
           mkdir -p release/
+          # مسیر دقیق‌تر برای کپی فایل‌ها
           for file in artifacts/*/*; do
-            cp "$file" release/
+            if [ -f "$file" ]; then
+              cp "$file" release/
+            fi
           done
 
       - name: Create Archives
