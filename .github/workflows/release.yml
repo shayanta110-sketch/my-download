@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Project
+        run: |
+          mkdir -p dist
+          echo "test build" > dist/myapp.txt
+          # دستور Build واقعی خود را جایگزین کنید
+
+      - name: Compress with Zstd
+        run: |
+          sudo apt-get update && sudo apt-get install -y zstd
+          tar -cf dist.tar -C dist/ .
+          zstd -T0 -19 -o dist.tar.zst dist.tar
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist.tar.zst
