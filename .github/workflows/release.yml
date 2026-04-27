@@ -1,15 +1,16 @@
 name: Release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build and Release
+  release:
+    name: Create Release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -18,16 +19,18 @@ jobs:
       - name: Build Project
         run: |
           mkdir -p dist
-          echo "test build" > dist/myapp.txt
-          # دستور Build واقعی خود را جایگزین کنید
+          echo "build version: ${GITHUB_REF_NAME}" > dist/version.txt
 
-      - name: Compress with Zstd
+      - name: Create Archive
         run: |
           sudo apt-get update && sudo apt-get install -y zstd
           tar -cf dist.tar -C dist/ .
           zstd -T0 -19 -o dist.tar.zst dist.tar
 
-      - name: Upload Release Asset
-        uses: softprops/action-gh-release@v2
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
         with:
-          files: dist.tar.zst
+          artifacts: "dist.tar.zst"
+          generateReleaseNotes: true
+          draft: false
+          prerelease: false
