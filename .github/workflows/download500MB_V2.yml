@@ -1,4 +1,4 @@
-name: "V2_Download and Split Large Model from Hugging Face"
+name: "دانلود مدل و پارتیشن‌بندی مطمئن با 7z"
 
 on:
   workflow_dispatch:
@@ -12,89 +12,76 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: نصب 7-Zip
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+
       - name: Create download directory
         run: mkdir -p ./downloaded-model
 
-      - name: Download model directly from Hugging Face
+      - name: Download model from Hugging Face
         run: |
-          wget https://huggingface.co/mradermacher/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored-i1-GGUF/resolve/main/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored.i1-Q4_K_M.gguf -O ./downloaded-model/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored.i1-Q4_K_M.gguf
-          
-      - name: Calculate total size
-        id: check-size
-        run: |
-          total_bytes=$(du -sb ./downloaded-model | cut -f1)
-          total_mb=$((total_bytes / 1024 / 1024))
-          echo "Total size: ${total_mb} MB"
-          if [ $total_bytes -gt 900000000 ]; then
-            echo "single_file=false" >> $GITHUB_OUTPUT
-          else
-            echo "single_file=true" >> $GITHUB_OUTPUT
-          fi
+          wget https://huggingface.co/mradermacher/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored-i1-GGUF/resolve/main/Qwen3-MOE-6x1.7B-10.2B-Shining-Madness-Uncensored.i1-Q4_K_M.gguf -O ./downloaded-model/model.gguf
 
-      - name: Create ZIP archive with 500MB split parts
-        if: steps.check-size.outputs.single_file == 'false'
+      - name: Create a single uncompressed ZIP (store mode, fast)
         run: |
-          zip -s 500m -r model.zip ./downloaded-model/
-          echo "Files created by zip -s:"
-          ls -lh model.z* model.zip 2>/dev/null || echo "No split files found"
+          cd downloaded-model
+          zip -0 -r ../original.zip .
+          cd ..
+
+      - name: Split into 500MB parts using 7z
+        run: |
+          # با 7z به حجم 500 مگابایت پارتیشن می‌کنیم (خروجی: original.zip.001, original.zip.002, ...)
+          7z -v500m a model-part.7z original.zip
+          # فایل اصلی حجیم را حذف می‌کنیم تا فضای Actions پر نشود
+          rm original.zip
+          # تغییر نام فایل‌ها به فرمت partXX.zip (اختیاری)
           part_num=1
-          for file in $(ls -v model.z* 2>/dev/null); do
+          for file in $(ls -v model-part.7z.* 2>/dev/null); do
             printf -v new_name "part%02d.zip" "$part_num"
             mv "$file" "$new_name"
-            echo "Created: $new_name"
             ((part_num++))
           done
-          if [ -f model.zip ]; then
-            printf -v new_name "part%02d.zip" "$part_num"
-            mv model.zip "$new_name"
-            echo "Created: $new_name"
+
+      - name: ** اعتبارسنجی فوری پارتیشن‌ها (قبل از انتشار) **
+        run: |
+          # ترکیب موقت فایل‌ها با cat
+          cat part*.zip > temp_combined.zip
+          # تست یکپارچگی با 7z (روش امن‌تر)
+          if 7z t temp_combined.zip > /dev/null 2>&1; then
+            echo "✅ اعتبارسنجی موفق - پارتیشن‌ها سالم هستند"
+          else
+            echo "❌ اعتبارسنجی ناموفق - پارتیشن‌ها خراب هستند یا ترتیب اشتباه است"
+            exit 1
           fi
+          rm temp_combined.zip
 
-      - name: Create single ZIP file (when size <= 900MB)
-        if: steps.check-size.outputs.single_file == 'true'
-        run: |
-          zip -r model.zip ./downloaded-model/
-          mv model.zip part01.zip
-          echo "Created: part01.zip"
-
-      - name: Verify files exist
-        run: |
-          echo "List of files to upload:"
-          ls -la part*.zip || echo "No part*.zip files found"
+      - name: List files to upload
+        run: ls -lh part*.zip
 
       - name: Create Git tag
         id: tag
         run: |
-          # مقدار یکتا برای tag (شامل زمان)
           TAG_NAME="model-download-${{ github.run_number }}-$(date +'%Y%m%d%H%M%S')"
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
-          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # ساخت tag
           git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
-          
-          # پوش tag به ریموت
           git push origin "$TAG_NAME"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create GitHub Release and upload files
+      - name: Create GitHub Release and upload parts
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.TAG_NAME }}
           name: "Model Download ${{ github.run_number }}"
           body: |
-            ## 📦 فایل‌های مدل دانلود شده
-            $(for f in part*.zip; do echo "- $f"; done)
+            ## 📦 پارتیشن‌های مدل (تضمین شده با 7z)
             
             برای استخراج فایل اصلی:
             1. همه فایل‌های part*.zip را دانلود کنید.
-            2. در لینوکس/مک: `cat part*.zip > combined.zip && unzip combined.zip`
-            3. در ویندوز: همه فایل‌ها را در یک پوشه قرار دهید، سپس با 7-Zip یا WinRAR فایل part01.zip را باز کنید.
+            2. در لینوکس/مک: `cat part*.zip > combined.zip && 7z x combined.zip`
+            3. در ویندوز: با 7-Zip فایل part01.zip را باز کنید (خودکار بقیه را می‌خواند).
           files: part*.zip
-          draft: false
-          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
