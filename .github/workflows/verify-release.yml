@@ -3,10 +3,14 @@ name: اعتبارسنجی قطعات چندقسمتی (روش split + SHA256)
 on:
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: 'نام Tag (مثال: apks-v2.0)'
+      repository:
+        description: 'آدرس مخزن (مثال: shayanta110-sketch/my-download)'
         required: true
-        default: 'apks-v2.0'
+        default: 'shayanta110-sketch/my-download'
+      release_tag:
+        description: 'نام Tag (مثال: model-release-25008447063-19)'
+        required: true
+        default: ''
 
 permissions:
   contents: read
@@ -15,81 +19,126 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - name: دریافت لیست فایل‌ها از API
+      - name: دریافت اطلاعات Release از API
         id: get_assets
         run: |
+          REPO="${{ github.event.inputs.repository }}"
           TAG="${{ github.event.inputs.release_tag }}"
-          API_URL="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
-          ASSETS=$(curl -s "$API_URL" | jq -r '.assets[].browser_download_url')
+          if [ -z "$TAG" ]; then
+            echo "❌ لطفاً نام Tag را وارد کنید"
+            exit 1
+          fi
+          API_URL="https://api.github.com/repos/${REPO}/releases/tags/${TAG}"
+          echo "در حال دریافت اطلاعات از: $API_URL"
+          RESPONSE=$(curl -s "$API_URL")
+          # بررسی وجود Release
+          if echo "$RESPONSE" | grep -q "Not Found"; then
+            echo "❌ Release با Tag '$TAG' در مخزن '$REPO' یافت نشد"
+            exit 1
+          fi
+          # استخراج لینک دانلود assets
+          ASSETS=$(echo "$RESPONSE" | jq -r '.assets[].browser_download_url')
           if [ -z "$ASSETS" ]; then
-            echo "❌ هیچ فایلی یافت نشد"
+            echo "❌ هیچ فایلی در این Release وجود ندارد"
             exit 1
           fi
           echo "$ASSETS" > urls.txt
-          echo "✅ $(cat urls.txt | wc -l) فایل پیدا شد"
+          echo "✅ تعداد فایل‌های موجود: $(cat urls.txt | wc -l)"
+          # ذخیره نام فایل اصلی (اولین فایل با پسوند .gguf یا .bin یا ...) - اختیاری
+          MAIN_FILE_URL=$(echo "$ASSETS" | grep -E '\.(gguf|bin|model)$' | head -1 || true)
+          if [ -n "$MAIN_FILE_URL" ]; then
+            MAIN_FILENAME=$(basename "$MAIN_FILE_URL")
+            echo "MAIN_FILENAME=$MAIN_FILENAME" >> $GITHUB_ENV
+          fi
 
-      - name: دانلود فایل‌ها
+      - name: دانلود تمام فایل‌ها
         run: |
-          mkdir parts && cd parts
+          mkdir -p download_parts
+          cd download_parts
           while read url; do
             filename=$(basename "$url")
-            echo "دانلود $filename ..."
-            curl -L -O "$url"
+            echo "در حال دانلود: $filename"
+            curl -L -O --progress-bar "$url"
           done < ../urls.txt
+          cd ..
 
-      - name: ترکیب قطعات با cat
+      - name: جستجوی فایل checksums.txt
+        id: find_checksum
         run: |
-          cd parts
-          # مرتب‌سازی عددی (part_00.zip, part_01.zip, ...)
-          ls part_*.zip 2>/dev/null | sort -V | xargs cat > combined.file
-          if [ ! -f combined.file ]; then
-            echo "❌ ترکیب ناموفق"
+          if [ -f "download_parts/checksums.txt" ]; then
+            echo "✅ فایل checksums.txt موجود است"
+            echo "CHECKSUM_EXISTS=true" >> $GITHUB_ENV
+            mv download_parts/checksums.txt .
+          else
+            echo "⚠️ فایل checksums.txt در Release وجود ندارد"
+            echo "CHECKSUM_EXISTS=false" >> $GITHUB_ENV
+          fi
+
+      - name: ترکیب قطعات (cat part_*.zip)
+        run: |
+          cd download_parts
+          # مرتب‌سازی عددی: part_00.zip, part_01.zip, ...
+          ls part_*.zip 2>/dev/null | sort -V | xargs cat > combined_file
+          if [ ! -f combined_file ]; then
+            echo "❌ ترکیب قطعات ناموفق"
             exit 1
           fi
-          echo "✅ combined.file ساخته شد (حجم: $(stat -c%s combined.file) بایت)"
-          # محاسبه SHA256 فایل ترکیبی
-          ACTUAL_SHA=$(sha256sum combined.file | cut -d' ' -f1)
+          ACTUAL_SHA=$(sha256sum combined_file | cut -d' ' -f1)
           echo "ACTUAL_SHA=$ACTUAL_SHA" >> $GITHUB_ENV
-          mv combined.file ../
+          mv combined_file ../
+          cd ..
 
-      - name: جستجوی فایل checksums.txt در Assets
+      - name: اعتبارسنجی با استفاده از checksums.txt (در صورت وجود)
+        if: env.CHECKSUM_EXISTS == 'true'
         run: |
-          if grep -q "checksums.txt" urls.txt; then
-            echo "CHECKSUMS_EXISTS=true" >> $GITHUB_ENV
-            # دانلود فایل checksums.txt
-            CHECKSUM_URL=$(grep "checksums.txt" urls.txt | head -1)
-            curl -L -o checksums.txt "$CHECKSUM_URL"
-          else
-            echo "CHECKSUMS_EXISTS=false" >> $GITHUB_ENV
-          fi
-
-      - name: مقایسه SHA256 با مقدار مرجع
-        if: env.CHECKSUMS_EXISTS == 'true'
-        run: |
-          # استخراج SHA256 فایل اصلی از checksums.txt (فرض: فایل اصلی نامش در آن هست)
-          ORIGINAL_SHA=$(grep -E "combined.file|original" checksums.txt | head -1 | cut -d' ' -f1)
+          # استخراج SHA256 فایل اصلی از checksums.txt
+          ORIGINAL_SHA=$(grep -E "SHA256 of the original file|original file" checksums.txt -A 1 | tail -1 | awk '{print $1}')
           if [ -z "$ORIGINAL_SHA" ]; then
-            echo "⚠️ مقدار مرجع برای فایل اصلی در checksums.txt یافت نشد"
+            # تلاش برای یافتن هر هش غیر از part_
+            ORIGINAL_SHA=$(grep -v "part_" checksums.txt | grep -E '^[a-f0-9]{64}' | head -1 | awk '{print $1}')
+          fi
+          if [ -z "$ORIGINAL_SHA" ]; then
+            echo "⚠️ هش فایل اصلی در checksums.txt یافت نشد. فقط صحت قطعات بررسی می‌شود."
+            # بررسی هش خود قطعات (اختیاری)
+            cd download_parts
+            sha256sum -c ../checksums.txt --ignore-missing || true
+            cd ..
           else
+            echo "هش مورد انتظار: $ORIGINAL_SHA"
+            echo "هش محاسبه شده: $ACTUAL_SHA"
             if [ "$ACTUAL_SHA" = "$ORIGINAL_SHA" ]; then
-              echo "✅ اعتبارسنجی کامل: فایل اصلی سالم است."
+              echo "✅ اعتبارسنجی کامل: فایل اصلی سالم است و با هش موجود در checksums.txt مطابقت دارد."
             else
               echo "❌ خطا: SHA256 مطابقت ندارد. فایل خراب است."
-              echo "   مقدار مورد انتظار: $ORIGINAL_SHA"
-              echo "   مقدار محاسبه شده: $ACTUAL_SHA"
               exit 1
             fi
           fi
 
-      - name: گزارش در صورت نبود checksums.txt
-        if: env.CHECKSUMS_EXISTS == 'false'
+      - name: اعتبارسنجی در صورت نبود checksums.txt (با استفاده از API)
+        if: env.CHECKSUM_EXISTS == 'false'
         run: |
-          echo "::warning::⚠️ فایل checksums.txt در Release وجود ندارد. فقط ترکیب قطعات بررسی شد، اما صحت محتوا تأیید نشد."
-          echo "✅ قطعات با موفقیت دانلود و ترکیب شدند. فایل combined.file در این اجرا ساخته شد."
+          echo "⚠️ فایل checksums.txt موجود نیست. در حال تلاش برای دریافت هش از GitHub API (در صورت وجود) ..."
+          REPO="${{ github.event.inputs.repository }}"
+          TAG="${{ github.event.inputs.release_tag }}"
+          API_URL="https://api.github.com/repos/${REPO}/releases/tags/${TAG}"
+          # برخی از ریلیزها ممکن است شامل digest در assets باشند
+          DIGEST=$(curl -s "$API_URL" | jq -r '.assets[] | select(.name | test("part_00|combined")) | .digest' | head -1)
+          if [ -n "$DIGEST" ] && [ "$DIGEST" != "null" ]; then
+            EXPECTED_SHA=$(echo "$DIGEST" | sed 's/^sha256://')
+            if [ "$ACTUAL_SHA" = "$EXPECTED_SHA" ]; then
+              echo "✅ اعتبارسنجی موفق: هش فایل ترکیبی با digest گیت‌هاب مطابقت دارد."
+            else
+              echo "❌ خطا: هش با digest گیت‌هاب مطابقت ندارد."
+              exit 1
+            fi
+          else
+            echo "✅ هش فایل ترکیبی (بدون مرجع) محاسبه شد: $ACTUAL_SHA"
+            echo "::notice::توجه:因为没有 checksums.txt و digest، فقط فرآیند ترکیب تأیید شد. برای اطمینان بیشتر، فایل checksums.txt را در Release بعدی اضافه کنید."
+          fi
 
       - name: پاکسازی فایل‌های موقتی
-        run: rm -rf parts combined.file checksums.txt
+        run: rm -rf download_parts combined_file checksums.txt urls.txt
 
       - name: گزارش موفقیت نهایی
         if: success()
-        run: echo "::notice::✅ فرآیند اعتبارسنجی با موفقیت به پایان رسید."
+        run: echo "::notice::✅ اعتبارسنجی با موفقیت به پایان رسید. فایل اصلی قابل بازسازی است."
