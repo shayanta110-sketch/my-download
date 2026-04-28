@@ -1,4 +1,4 @@
-name: "دانلود و پارتیشن‌بندی چند مدل (پشت سر هم - پایدار)"
+name: "دانلود و پارتیشن‌بندی چند مدل (حلقه پایدار)"
 
 on:
   workflow_dispatch:
@@ -25,133 +25,124 @@ on:
         default: '500'
 
 jobs:
-  prepare-matrix:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    steps:
-      - name: نصب jq
-        run: sudo apt-get install -y jq
-      - name: تبدیل لیست به آرایه JSON
-        id: set-matrix
-        run: |
-          # دریافت ورودی و ذخیره در فایل موقت
-          cat > models.txt << 'EOF'
-          ${{ github.event.inputs.models_list }}
-          EOF
-          # حذف خطوط خالی و فضاهای اضافی، سپس تبدیل به JSON array
-          cat models.txt | grep -v '^\s*$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -R . | jq -s -c . > matrix.json
-          MATRIX=$(cat matrix.json)
-          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
-          echo "آرایه JSON تولید شد: $MATRIX"
-
-  process-models:
-    needs: prepare-matrix
+  process-all-models:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    strategy:
-      matrix:
-        model_url: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
-      fail-fast: false
     steps:
       - name: بررسی مخزن
         uses: actions/checkout@v4
 
       - name: نصب ابزارهای مورد نیاز
-        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full jq
 
-      - name: تشخیص نام فایل از لینک
-        id: extract_name
+      - name: پردازش لیست مدل‌ها به صورت حلقه
         run: |
-          URL="${{ matrix.model_url }}"
-          CLEAN_URL="${URL%%\?*}"
-          FULL_FILE_NAME=$(basename "$CLEAN_URL")
-          echo "FULL_FILE_NAME=$FULL_FILE_NAME" >> $GITHUB_ENV
-          echo "نام فایل: $FULL_FILE_NAME"
+          # ذخیره لیست در یک فایل موقت
+          cat > models.txt << 'EOF'
+          ${{ github.event.inputs.models_list }}
+          EOF
 
-      - name: دانلود مدل
-        run: |
-          echo "📥 در حال دانلود: ${{ matrix.model_url }}"
-          wget --progress=bar:force "${{ matrix.model_url }}" -O "${{ env.FULL_FILE_NAME }}"
+          # شمارنده برای ساخت Tagهای یکتا (اختیاری)
+          COUNTER=1
 
-      - name: ذخیره SHA256 فایل اصلی
-        id: hash_original
-        run: |
-          ORIGINAL_HASH=$(sha256sum "${{ env.FULL_FILE_NAME }}" | cut -d' ' -f1)
-          echo "ORIGINAL_HASH=$ORIGINAL_HASH" >> $GITHUB_ENV
-          echo "هش فایل اصلی: $ORIGINAL_HASH"
+          # خواندن خط به خط (حذف خطوط خالی)
+          while IFS= read -r URL || [ -n "$URL" ]; do
+            # حذف فضاهای خالی ابتدا و انتها
+            URL=$(echo "$URL" | xargs)
+            # اگر خط خالی بود، رد کن
+            [ -z "$URL" ] && continue
+            
+            echo "============================================="
+            echo "📥 شروع پردازش مدل شماره $COUNTER: $URL"
+            echo "============================================="
 
-      - name: پارتیشن‌بندی مستقیم فایل
-        run: |
-          SIZE_MB="${{ github.event.inputs.split_size_mb }}"
-          split -b "${SIZE_MB}M" --numeric-suffixes=1 -a 2 "${{ env.FULL_FILE_NAME }}" "part_"
-          for file in part_*; do
-            part_number=${file#part_}
-            mv "$file" "part_${part_number}.zip"
-          done
-          rm -f "${{ env.FULL_FILE_NAME }}"
-          echo "✅ پارتیشن‌بندی انجام شد."
+            # -------- 1. استخراج نام فایل ----------
+            CLEAN_URL="${URL%%\?*}"
+            FULL_FILE_NAME=$(basename "$CLEAN_URL")
+            echo "نام فایل: $FULL_FILE_NAME"
 
-      - name: ایجاد فایل checksums.txt استاندارد
-        run: |
-          echo "# Checksums for ${{ env.FULL_FILE_NAME }}" > checksums.txt
-          echo "" >> checksums.txt
-          echo "${{ env.ORIGINAL_HASH }}  ${{ env.FULL_FILE_NAME }}" >> checksums.txt
-          sha256sum part_*.zip >> checksums.txt
-          cat checksums.txt
+            # -------- 2. دانلود مدل ----------
+            echo "در حال دانلود..."
+            wget --progress=bar:force "$URL" -O "$FULL_FILE_NAME"
 
-      - name: اعتبارسنجی سریع قطعات
-        run: |
-          cat part_*.zip > temp_combined.file
-          ACTUAL_HASH=$(sha256sum temp_combined.file | cut -d' ' -f1)
-          if [ "$ACTUAL_HASH" = "${{ env.ORIGINAL_HASH }}" ]; then
-            echo "✅ اعتبارسنجی موفق"
-          else
-            echo "❌ خطا: هش قطعات با فایل اصلی مطابقت ندارد!"
-            exit 1
-          fi
-          rm temp_combined.file
+            # -------- 3. ذخیره SHA256 ----------
+            ORIGINAL_HASH=$(sha256sum "$FULL_FILE_NAME" | cut -d' ' -f1)
+            echo "هش فایل اصلی: $ORIGINAL_HASH"
 
-      - name: آماده‌سازی متن رلیز
-        run: |
-          cat > release_notes.md << EOF
-          ## 📦 دانلود مدل ${{ env.FULL_FILE_NAME }}
+            # -------- 4. پارتیشن‌بندی ----------
+            SIZE_MB="${{ github.event.inputs.split_size_mb }}"
+            split -b "${SIZE_MB}M" --numeric-suffixes=1 -a 2 "$FULL_FILE_NAME" "part_"
+            for file in part_*; do
+              part_number=${file#part_}
+              mv "$file" "part_${part_number}.zip"
+            done
+            rm -f "$FULL_FILE_NAME"
+            echo "✅ پارتیشن‌بندی انجام شد."
+
+            # -------- 5. ایجاد checksums.txt ----------
+            echo "# Checksums for $FULL_FILE_NAME" > checksums.txt
+            echo "" >> checksums.txt
+            echo "$ORIGINAL_HASH  $FULL_FILE_NAME" >> checksums.txt
+            sha256sum part_*.zip >> checksums.txt
+            cat checksums.txt
+
+            # -------- 6. اعتبارسنجی سریع ----------
+            cat part_*.zip > temp_combined.file
+            ACTUAL_HASH=$(sha256sum temp_combined.file | cut -d' ' -f1)
+            if [ "$ACTUAL_HASH" = "$ORIGINAL_HASH" ]; then
+              echo "✅ اعتبارسنجی موفق"
+            else
+              echo "❌ خطا: هش قطعات با فایل اصلی مطابقت ندارد!"
+              exit 1
+            fi
+            rm temp_combined.file
+
+            # -------- 7. آماده‌سازی متن Release ----------
+            cat > release_notes.md << RELEASE_EOF
+          ## 📦 دانلود مدل $FULL_FILE_NAME
           
           🚀 مدل با موفقیت دانلود و پارتیشن‌بندی شد.
           
-          **فایل اصلی:** \`${{ env.FULL_FILE_NAME }}\`
+          **فایل اصلی:** \`$FULL_FILE_NAME\`
           
           **هش SHA256 فایل اصلی:**
           \`\`\`
-          ${{ env.ORIGINAL_HASH }}
+          $ORIGINAL_HASH
           \`\`\`
           
           ### نحوه بازسازی فایل اصلی:
           1. تمام فایل‌های \`part_*.zip\` را در یک پوشه دانلود کنید.
           2. در ترمینال (لینوکس، macOS یا WSL ویندوز) دستور زیر را اجرا کنید:
              \`\`\`bash
-             cat part_*.zip > ${{ env.FULL_FILE_NAME }}
+             cat part_*.zip > $FULL_FILE_NAME
              \`\`\`
-          3. فایل اصلی \`${{ env.FULL_FILE_NAME }}\` بازسازی می‌شود.
+          3. فایل اصلی \`$FULL_FILE_NAME\` بازسازی می‌شود.
           
           ### بررسی صحت:
           - فایل \`checksums.txt\` شامل هش فایل اصلی و هش تک‌تک قطعات است.
           - برای بررسی خودکار: \`sha256sum -c checksums.txt\`
-          EOF
+          RELEASE_EOF
 
-      - name: ایجاد Release و آپلود با GitHub CLI
-        id: release
-        run: |
-          SAFE_NAME=$(echo "${{ env.FULL_FILE_NAME }}" | sed 's/[^a-zA-Z0-9._-]/_/g')
-          TAG_NAME="model-${SAFE_NAME}-${{ github.run_id }}-${{ github.run_number }}"
-          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
-          gh release create "$TAG_NAME" \
-            --title "📦 دانلود مدل ${{ env.FULL_FILE_NAME }}" \
-            --notes-file release_notes.md \
-            part_*.zip checksums.txt
+            # -------- 8. ساخت Tag و Release ----------
+            SAFE_NAME=$(echo "$FULL_FILE_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g')
+            TAG_NAME="model-${SAFE_NAME}-${{ github.run_id }}-${COUNTER}"
+            echo "Tag: $TAG_NAME"
+
+            gh release create "$TAG_NAME" \
+              --title "📦 دانلود مدل $FULL_FILE_NAME" \
+              --notes-file release_notes.md \
+              part_*.zip checksums.txt
+
+            echo "✅ مدل $FULL_FILE_NAME با موفقیت در Release $TAG_NAME منتشر شد."
+
+            # -------- 9. پاکسازی فایل‌های موقتی برای آزادسازی فضا ----------
+            rm -f part_*.zip checksums.txt release_notes.md
+            echo "---------------------------------------------"
+
+            COUNTER=$((COUNTER + 1))
+          done < models.txt
+
+          echo "🎉 همه مدل‌ها با موفقیت پردازش شدند."
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: اعلان موفقیت برای این مدل
-        run: echo "::notice::✅ مدل ${{ env.FULL_FILE_NAME }} با موفقیت پردازش و در Release ${{ env.TAG_NAME }} قرار گرفت."
