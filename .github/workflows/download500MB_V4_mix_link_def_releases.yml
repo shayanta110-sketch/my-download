@@ -1,0 +1,144 @@
+name: "دانلود و پارتیشن‌بندی چند مدل (پشت سر هم)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      models_list:
+        description: 'لیست لینک‌های مدل (هر لینک در یک خط)'
+        required: true
+        default: |
+          https://huggingface.co/lmstudio-community/UI-TARS-2B-SFT-GGUF/resolve/main/UI-TARS-2B-SFT-Q6_K.gguf?download=true
+          https://huggingface.co/mradermacher/LiteCoder-Terminal-4b-sft-i1-GGUF/resolve/main/LiteCoder-Terminal-4b-sft.i1-Q5_K_M.gguf?download=true
+          https://huggingface.co/QuantFactory/lb-reranker-0.5B-v1.0-GGUF/resolve/main/lb-reranker-0.5B-v1.0.Q8_0.gguf?download=true
+          https://huggingface.co/mradermacher/DeepSeek-R1-Distill-Llama-3B-tools-SFT-GGUF/resolve/main/DeepSeek-R1-Distill-Llama-3B-tools-SFT.Q5_K_M.gguf?download=true
+          https://huggingface.co/mradermacher/RealGuardrails-Llama3.2-3B-Instruct-SFT-DPO-GGUF/resolve/main/RealGuardrails-Llama3.2-3B-Instruct-SFT-DPO.Q6_K.gguf?download=true
+          https://huggingface.co/jdaddyalbs/qwen3_sft_playwright_gguf/resolve/main/unsloth.Q8_0.gguf?download=true
+          https://huggingface.co/mradermacher/DeepSeek-R1-Qwen2.5-1.5b-SFT-R1-JSON-Unstructured-To-Structured-GGUF/resolve/main/DeepSeek-R1-Qwen2.5-1.5b-SFT-R1-JSON-Unstructured-To-Structured.Q8_0.gguf?download=true
+          https://huggingface.co/mradermacher/Qwen3.5-0.8B-SFT-Claude-Opus-Reasoning-Unsloth-i1-GGUF/resolve/main/Qwen3.5-0.8B-SFT-Claude-Opus-Reasoning-Unsloth.i1-Q6_K.gguf?download=true
+          https://huggingface.co/GOBA-AI-Labs/GOBA-OLMoE-Expert-Tuned/resolve/main/OLMoE-code-tuned.gguf?download=true
+          https://huggingface.co/tripathyShaswata/Phi-tiny-MoE-instruct-GGUF/resolve/main/Phi-tiny-MoE-instruct-Q8_0.gguf?download=true
+          https://huggingface.co/RichardErkhov/JayHyeon_-_Qwen2.5-0.5B-SFT-2e-5-2ep-MDPO_1e-6-3ep_0alp_0lam-gguf/resolve/main/Qwen2.5-0.5B-SFT-2e-5-2ep-MDPO_1e-6-3ep_0alp_0lam.Q5_K_M.gguf?download=true
+          https://huggingface.co/LiquidAI/LFM2-8B-A1B-GGUF/resolve/main/LFM2-8B-A1B-Q4_K_M.gguf
+      split_size_mb:
+        description: 'حداکثر حجم هر پارتیشن (بر حسب مگابایت)'
+        required: false
+        default: '500'
+
+jobs:
+  process-models:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        model_url: ${{ fromJSON(format('[{0}]', join(github.event.inputs.models_list, ','))) }}
+      fail-fast: false
+    steps:
+      - name: بررسی مخزن
+        uses: actions/checkout@v4
+
+      - name: نصب ابزارهای مورد نیاز
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+
+      - name: تشخیص نام فایل از لینک
+        id: extract_name
+        run: |
+          URL="${{ matrix.model_url }}"
+          # حذف پارامترهای query string (?download=true)
+          CLEAN_URL="${URL%%\?*}"
+          FULL_FILE_NAME=$(basename "$CLEAN_URL")
+          echo "FULL_FILE_NAME=$FULL_FILE_NAME" >> $GITHUB_ENV
+          echo "نام فایل: $FULL_FILE_NAME"
+
+      - name: دانلود مدل
+        run: |
+          echo "📥 در حال دانلود: ${{ matrix.model_url }}"
+          wget --progress=bar:force "${{ matrix.model_url }}" -O "${{ env.FULL_FILE_NAME }}"
+
+      - name: ذخیره SHA256 فایل اصلی
+        id: hash_original
+        run: |
+          ORIGINAL_HASH=$(sha256sum "${{ env.FULL_FILE_NAME }}" | cut -d' ' -f1)
+          echo "ORIGINAL_HASH=$ORIGINAL_HASH" >> $GITHUB_ENV
+          echo "هش فایل اصلی: $ORIGINAL_HASH"
+
+      - name: پارتیشن‌بندی مستقیم فایل
+        run: |
+          SIZE_MB="${{ github.event.inputs.split_size_mb }}"
+          split -b "${SIZE_MB}M" --numeric-suffixes=1 -a 2 "${{ env.FULL_FILE_NAME }}" "part_"
+          for file in part_*; do
+            part_number=${file#part_}
+            mv "$file" "part_${part_number}.zip"
+          done
+          rm -f "${{ env.FULL_FILE_NAME }}"
+          echo "✅ پارتیشن‌بندی انجام شد."
+
+      - name: ایجاد فایل checksums.txt استاندارد
+        run: |
+          echo "# Checksums for ${{ env.FULL_FILE_NAME }}" > checksums.txt
+          echo "" >> checksums.txt
+          echo "${{ env.ORIGINAL_HASH }}  ${{ env.FULL_FILE_NAME }}" >> checksums.txt
+          sha256sum part_*.zip >> checksums.txt
+          cat checksums.txt
+
+      - name: اعتبارسنجی سریع قطعات
+        run: |
+          cat part_*.zip > temp_combined.file
+          ACTUAL_HASH=$(sha256sum temp_combined.file | cut -d' ' -f1)
+          if [ "$ACTUAL_HASH" = "${{ env.ORIGINAL_HASH }}" ]; then
+            echo "✅ اعتبارسنجی موفق"
+          else
+            echo "❌ خطا: هش قطعات با فایل اصلی مطابقت ندارد!"
+            exit 1
+          fi
+          rm temp_combined.file
+
+      - name: آماده‌سازی متن رلیز (مطابق مثال)
+        run: |
+          cat > release_notes.md << EOF
+          ## 📦 دانلود مدل ${{ env.FULL_FILE_NAME }}
+          
+          🚀 مدل با موفقیت دانلود و پارتیشن‌بندی شد.
+          
+          **فایل اصلی:** \`${{ env.FULL_FILE_NAME }}\`
+          
+          **هش SHA256 فایل اصلی:**
+          \`\`\`
+          ${{ env.ORIGINAL_HASH }}
+          \`\`\`
+          
+          ### نحوه بازسازی فایل اصلی:
+          1. تمام فایل‌های \`part_*.zip\` را در یک پوشه دانلود کنید.
+          2. در ترمینال (لینوکس، macOS یا WSL ویندوز) دستور زیر را اجرا کنید:
+             \`\`\`bash
+             cat part_*.zip > ${{ env.FULL_FILE_NAME }}
+             \`\`\`
+          3. فایل اصلی \`${{ env.FULL_FILE_NAME }}\` بازسازی می‌شود.
+          
+          ### بررسی صحت:
+          - فایل \`checksums.txt\` شامل هش فایل اصلی و هش تک‌تک قطعات است.
+          - برای بررسی خودکار: \`sha256sum -c checksums.txt\`
+          EOF
+
+      - name: حذف فایل‌های قدیمی در صورت وجود (اختیاری)
+        run: |
+          # اطمینان از پاکسازی هر گونه asset قدیمی با نام مشابه
+          echo "پیش‌نیازها آماده است."
+
+      - name: ایجاد Release و آپلود با GitHub CLI
+        id: release
+        run: |
+          # ساخت Tag یکتا برای این مدل (بر اساس نام فایل و زمان)
+          SAFE_NAME=$(echo "${{ env.FULL_FILE_NAME }}" | sed 's/[^a-zA-Z0-9._-]/_/g')
+          TAG_NAME="model-${SAFE_NAME}-${{ github.run_id }}-${{ github.run_number }}"
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+          
+          gh release create "$TAG_NAME" \
+            --title "📦 دانلود مدل ${{ env.FULL_FILE_NAME }}" \
+            --notes-file release_notes.md \
+            part_*.zip checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: اعلان موفقیت برای این مدل
+        run: echo "::notice::✅ مدل ${{ env.FULL_FILE_NAME }} با موفقیت پردازش و در Release ${{ env.TAG_NAME }} قرار گرفت."
