@@ -1,0 +1,127 @@
+name: "دانلود، کمّی‌سازی و پارتیشن‌بندی مدل (نسخه نهایی)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_url:
+        description: 'لینک مستقیم دانلود مدل (فایل .gguf فشرده‌نشده)'
+        required: true
+        default: 'https://huggingface.co/chewjh/cs4262-qwen-sft-n8n-GGUF/resolve/main/cs4262-qwen-sft-n8n-f16.gguf?download=true'
+      quant_type:
+        description: 'نوع کمّی‌سازی (مثال: Q4_K_M, Q5_K_M, Q8_0)'
+        required: true
+        default: 'Q4_K_M'
+      split_size:
+        description: 'حداکثر حجم هر بخش به مگابایت (پارتیشن‌بندی)'
+        required: true
+        default: '500'
+
+jobs:
+  quantize-and-upload:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # 1. بررسی و آماده‌سازی محیط
+      - name: بررسی مخزن (Checkout)
+        uses: actions/checkout@v4
+
+      - name: نصب ابزارهای مورد نیاز (پایتون و کتابخانه‌ها)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake p7zip-full jq
+
+      # 2. دانلود و کامپایل llama.cpp
+      - name: کامپایل llama.cpp از سورس
+        run: |
+          git clone https://github.com/ggerganov/llama.cpp
+          cd llama.cpp
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --config Release -j$(nproc)
+
+      # 3. دانلود مدل اصلی (نسخه f16)
+      - name: دانلود مدل اصلی از Hugging Face
+        id: download
+        run: |
+          URL="${{ github.event.inputs.model_url }}"
+          FULL_FILE_NAME=$(basename "$URL")
+          echo "در حال دانلود: $FULL_FILE_NAME"
+          wget --progress=bar:force "$URL" -O "$FULL_FILE_NAME"
+          echo "FULL_FILE_NAME=$FULL_FILE_NAME" >> $GITHUB_ENV
+
+      # 4. اعمال کمّی‌سازی (Quantization) با llama.cpp
+      - name: کمّی‌سازی مدل با ${{ github.event.inputs.quant_type }}
+        run: |
+          INPUT_FILE="${{ env.FULL_FILE_NAME }}"
+          QUANT_TYPE="${{ github.event.inputs.quant_type }}"
+          OUTPUT_FILE="${INPUT_FILE%.gguf}_${QUANT_TYPE}.gguf"
+
+          cd llama.cpp/build/bin
+          ./llama-quantize "../../../$INPUT_FILE" "../../../$OUTPUT_FILE" "$QUANT_TYPE"
+          cd ../../..
+
+          echo "QUANTIZED_FILE=$OUTPUT_FILE" >> $GITHUB_ENV
+
+      # 5. حذف فایل اصلی برای صرفه‌جویی در فضا
+      - name: حذف فایل اصلی (برای آزادسازی فضا)
+        run: rm -f "${{ env.FULL_FILE_NAME }}"
+
+      # 6. ذخیره هش SHA256 فایل کمّی‌سازی شده
+      - name: ذخیره SHA256 فایل کمّی‌سازی شده
+        id: hash_original
+        run: |
+          ORIGINAL_HASH=$(sha256sum "${{ env.QUANTIZED_FILE }}" | cut -d' ' -f1)
+          echo "ORIGINAL_HASH=$ORIGINAL_HASH" >> $GITHUB_ENV
+          echo "هش فایل کمّی‌سازی شده: $ORIGINAL_HASH"
+
+      # 7. پارتیشن‌بندی فایل کمّی‌سازی شده (روش split)
+      - name: پارتیشن‌بندی فایل کمّی‌سازی شده
+        run: |
+          SIZE_MB="${{ github.event.inputs.split_size }}"
+          split -b "${SIZE_MB}M" --numeric-suffixes=1 -a 2 "${{ env.QUANTIZED_FILE }}" "part_"
+          for file in part_*; do
+            part_number=${file#part_}
+            mv "$file" "part_${part_number}.zip"
+          done
+          rm -f "${{ env.QUANTIZED_FILE }}"
+          echo "✅ پارتیشن‌بندی با موفقیت انجام شد."
+
+      # 8. ایجاد فایل checksums.txt استاندارد
+      - name: ایجاد فایل checksums.txt
+        run: |
+          echo "# Checksums for quantized model: ${{ env.QUANTIZED_FILE }}" > checksums.txt
+          echo "# Quantization type: ${{ github.event.inputs.quant_type }}" >> checksums.txt
+          echo "" >> checksums.txt
+          echo "${{ env.ORIGINAL_HASH }}  ${{ env.QUANTIZED_FILE }}" >> checksums.txt
+          sha256sum part_*.zip >> checksums.txt
+          cat checksums.txt
+
+      # 9. اعتبارسنجی سریع (ترکیب و مقایسه هش)
+      - name: اعتبارسنجی یکپارچگی قطعات
+        run: |
+          cat part_*.zip > temp_combined.file
+          ACTUAL_HASH=$(sha256sum temp_combined.file | cut -d' ' -f1)
+          if [ "$ACTUAL_HASH" = "${{ env.ORIGINAL_HASH }}" ]; then
+            echo "✅ اعتبارسنجی موفق: هش قطعات ترکیبی با فایل اصلی مطابقت دارد."
+          else
+            echo "❌ خطا: هش قطعات ترکیبی با فایل اصلی همخوانی ندارد!"
+            exit 1
+          fi
+          rm temp_combined.file
+
+      # 10. انتشار فایل‌ها در GitHub Release
+      - name: انتشار با GitHub CLI
+        id: release
+        run: |
+          TAG_NAME="quantized-model-${{ github.run_id }}-${{ github.run_number }}"
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+          gh release create "$TAG_NAME" \
+            --title "مدل کمّی‌سازی شده با ${{ github.event.inputs.quant_type }}" \
+            --notes "## 📦 مدل با موفقیت کمّی‌سازی و پارتیشن‌بندی شد.\n\n**نوع کمّی‌سازی:** \`${{ github.event.inputs.quant_type }}\`\n\n**هش SHA256 فایل اصلی:** \`${{ env.ORIGINAL_HASH }}\`\n\n### نحوه بازسازی:\n1. تمام فایل‌های \`part_*.zip\` را دانلود کنید.\n2. در ترمینال دستور زیر را اجرا کنید:\n   \`\`\`bash\n   cat part_*.zip > ${{ env.QUANTIZED_FILE }}\n   \`\`\`" \
+            part_*.zip checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: گزارش نهایی موفقیت
+        run: echo "::notice::✅ همه مراحل با موفقیت انجام شد. Release در آدرس https://github.com/${{ github.repository }}/releases/tag/${{ env.TAG_NAME }} ایجاد گردید."
