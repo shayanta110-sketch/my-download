@@ -1,4 +1,4 @@
-name: "دانلود و پارتیشن‌بندی چند مدل (پشت سر هم - نسخه پایدار)"
+name: "دانلود و پارتیشن‌بندی چند مدل (پشت سر هم - پایدار)"
 
 on:
   workflow_dispatch:
@@ -25,26 +25,28 @@ on:
         default: '500'
 
 jobs:
-  # Job مخصوص تبدیل لیست به آرایه JSON
   prepare-matrix:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - name: تبدیل لیست ورودی به JSON array
+      - name: نصب jq
+        run: sudo apt-get install -y jq
+      - name: تبدیل لیست به آرایه JSON
         id: set-matrix
         run: |
-          # دریافت لیست ورودی (هر خط یک لینک)
-          MODELS_LIST="${{ github.event.inputs.models_list }}"
-          # تبدیل خطوط به آرایه JSON
-          # حذف خطوط خالی و کوتاه کردن فضاهای خالی
-          JSON_ARRAY=$(echo "$MODELS_LIST" | grep -v '^\s*$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -R . | jq -s .)
-          echo "matrix=$JSON_ARRAY" >> $GITHUB_OUTPUT
-          echo "آرایه ایجاد شده: $JSON_ARRAY"
+          # دریافت ورودی و ذخیره در فایل موقت
+          cat > models.txt << 'EOF'
+          ${{ github.event.inputs.models_list }}
+          EOF
+          # حذف خطوط خالی و فضاهای اضافی، سپس تبدیل به JSON array
+          cat models.txt | grep -v '^\s*$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -R . | jq -s -c . > matrix.json
+          MATRIX=$(cat matrix.json)
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "آرایه JSON تولید شد: $MATRIX"
 
-  # پردازش هر مدل به صورت مستقل
   process-models:
-    needs: [prepare-matrix]
+    needs: prepare-matrix
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -111,7 +113,7 @@ jobs:
           fi
           rm temp_combined.file
 
-      - name: آماده‌سازی متن رلیز (مطابق مثال)
+      - name: آماده‌سازی متن رلیز
         run: |
           cat > release_notes.md << EOF
           ## 📦 دانلود مدل ${{ env.FULL_FILE_NAME }}
@@ -144,7 +146,6 @@ jobs:
           SAFE_NAME=$(echo "${{ env.FULL_FILE_NAME }}" | sed 's/[^a-zA-Z0-9._-]/_/g')
           TAG_NAME="model-${SAFE_NAME}-${{ github.run_id }}-${{ github.run_number }}"
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
-          
           gh release create "$TAG_NAME" \
             --title "📦 دانلود مدل ${{ env.FULL_FILE_NAME }}" \
             --notes-file release_notes.md \
