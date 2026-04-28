@@ -1,52 +1,19 @@
-name: دانلود و پارتیشن‌بندی چند مدل (نسخه JSON)
+name: "دانلود و پارتیشن‌بندی چند مدل (نسخه نهایی - Bypass Truncation)"
 
 on:
   workflow_dispatch:
     inputs:
       models_json:
-        description: 'آرایه JSON از لینک‌های مدل‌ها (مثال: ["url1", "url2", ...])'
+        description: 'JSON array of Hugging Face model URLs'
         required: true
         default: '[]'
-      pr_numbers:
-        description: 'شماره PRها (اختیاری)'
-        required: false
-        type: string
-        default: ''
       split_size_mb:
-        description: 'حداکثر حجم هر پارتیشن (مگابایت)'
+        description: 'Split size in megabytes (default: 500)'
         required: false
         default: '500'
-      version_tag:
-        description: 'نسخه Tags‌ها (اختیاری)'
-        required: false
-        type: string
-        default: 'latest'
 
 jobs:
-  validate-prs:
-    runs-on: ubuntu-latest
-    outputs:
-      resolved_pr_numbers: ${{ steps.validate.outputs.resolved_pr_numbers }}
-    steps:
-      - name: Validate PR Numbers
-        id: validate
-        run: |
-          RESOLVED_PR=""
-          if [ -n "${{ github.event.inputs.pr_numbers }}" ]; then
-            IFS=',' read -ra PR_ARR <<< "${{ github.event.inputs.pr_numbers }}"
-            echo "PRs to consider: ${PR_ARR[@]}"
-          else
-            echo "No PRs provided."
-          fi
-          echo "resolved_pr_numbers=${RESOLVED_PR}" >> $GITHUB_OUTPUT
-
-      - name: Build tag matrix
-        id: build-tag-matrix
-        run: |
-          # ... (کد ساخت ماتریکس تگ‌ها)
-
   process-models:
-    needs: [validate-prs]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -55,31 +22,34 @@ jobs:
         model_url: ${{ fromJSON(github.event.inputs.models_json) }}
       fail-fast: false
     steps:
-      - name: بررسی مخزن
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: نصب ابزارهای مورد نیاز
-        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+      - name: Install tools quietly
+        run: |
+          sudo apt-get update > /dev/null 2>&1
+          sudo apt-get install -y p7zip-full > /dev/null 2>&1
 
-      - name: تشخیص نام فایل از لینک
+      - name: Extract filename from URL
         id: extract_name
         run: |
           URL="${{ matrix.model_url }}"
           CLEAN_URL="${URL%%\?*}"
           FULL_FILE_NAME=$(basename "$CLEAN_URL")
           echo "FULL_FILE_NAME=$FULL_FILE_NAME" >> $GITHUB_ENV
+          echo "::notice::Processing $FULL_FILE_NAME"
 
-      - name: دانلود مدل
+      - name: Download model (silent)
         run: |
-          wget --progress=bar:force "${{ matrix.model_url }}" -O "${{ env.FULL_FILE_NAME }}"
+          wget --quiet --show-progress "${{ matrix.model_url }}" -O "${{ env.FULL_FILE_NAME }}"
 
-      - name: ذخیره SHA256 فایل اصلی (قبل از پارتیشن‌بندی)
+      - name: Get SHA256 hash
         id: hash_original
         run: |
           ORIGINAL_HASH=$(sha256sum "${{ env.FULL_FILE_NAME }}" | cut -d' ' -f1)
           echo "ORIGINAL_HASH=$ORIGINAL_HASH" >> $GITHUB_ENV
 
-      - name: پارتیشن‌بندی مستقیم فایل
+      - name: Split file into parts (silent)
         run: |
           SIZE_MB="${{ github.event.inputs.split_size_mb }}"
           split -b "${SIZE_MB}M" --numeric-suffixes=1 -a 2 "${{ env.FULL_FILE_NAME }}" "part_"
@@ -88,31 +58,71 @@ jobs:
             mv "$file" "part_${part_number}.zip"
           done
           rm -f "${{ env.FULL_FILE_NAME }}"
-          echo "✅ پارتیشن‌بندی انجام شد."
 
-      - name: ایجاد فایل checksums.txt استاندارد
+      - name: Create checksums.txt
         run: |
-          echo "# Checksums for ${{ env.FULL_FILE_NAME }}" > checksums.txt
-          echo "" >> checksums.txt
-          echo "${{ env.ORIGINAL_HASH }}  ${{ env.FULL_FILE_NAME }}" >> checksums.txt
-          sha256sum part_*.zip >> checksums.txt
+          {
+            echo "# Checksums for ${{ env.FULL_FILE_NAME }}"
+            echo ""
+            echo "${{ env.ORIGINAL_HASH }}  ${{ env.FULL_FILE_NAME }}"
+            sha256sum part_*.zip
+          } > checksums.txt
 
-      - name: اعتبارسنجی سریع قطعات
+      - name: Quick integrity check (silent)
         run: |
-          cat part_*.zip > temp_combined.file
+          cat part_*.zip > temp_combined.file > /dev/null 2>&1
           ACTUAL_HASH=$(sha256sum temp_combined.file | cut -d' ' -f1)
           if [ "$ACTUAL_HASH" = "${{ env.ORIGINAL_HASH }}" ]; then
-            echo "✅ اعتبارسنجی موفق"
+            echo "::notice::Integrity check passed for ${{ env.FULL_FILE_NAME }}"
           else
-            echo "❌ خطا: هش قطعات با فایل اصلی مطابقت ندارد!"
+            echo "::error::Integrity check failed for ${{ env.FULL_FILE_NAME }}"
             exit 1
           fi
           rm temp_combined.file
 
-      - name: آماده‌سازی متن رلیز
+      - name: Prepare Release Notes
         run: |
-          cat > release_notes.md << 'EOF'
-          ## 📦 دانلود مدل [MODEL_NAME]
-          🚀 مدل با موفقیت دانلود و پارتیشن‌بندی شد.
-          **فایل اصلی:** `[MODEL_NAME]`
-          **هش SHA256 فایل اصلی:**
+          cat > release_notes.md << EOF
+          ## 📦 Download Model: ${{ env.FULL_FILE_NAME }}
+          
+          🚀 Model successfully downloaded and split.
+          
+          **Original file:** \`${{ env.FULL_FILE_NAME }}\`
+          
+          **SHA256 hash of original file:**
+          \`\`\`
+          ${{ env.ORIGINAL_HASH }}
+          \`\`\`
+          
+          ### How to reconstruct the original file:
+          1. Download all \`part_*.zip\` files into a folder.
+          2. Run the following command in your terminal:
+             \`\`\`bash
+             cat part_*.zip > ${{ env.FULL_FILE_NAME }}
+             \`\`\`
+          3. The original file \`${{ env.FULL_FILE_NAME }}\` will be reconstructed.
+          
+          ### Verify integrity:
+          - The \`checksums.txt\` file contains the SHA256 hash of the original file and all parts.
+          - Use \`sha256sum -c checksums.txt\` to verify.
+          EOF
+
+      - name: Create Release and upload assets
+        id: release
+        run: |
+          SAFE_NAME=$(echo "${{ env.FULL_FILE_NAME }}" | sed 's/[^a-zA-Z0-9._-]/_/g')
+          TAG_NAME="model-${SAFE_NAME}-${{ github.run_id }}-${{ strategy.job-index }}"
+          gh release create "$TAG_NAME" \
+            --title "📦 Download Model: ${{ env.FULL_FILE_NAME }}" \
+            --notes-file release_notes.md \
+            part_*.zip checksums.txt \
+            --repo "${{ github.repository }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup
+        run: |
+          rm -rf part_*.zip checksums.txt release_notes.md
+
+      - name: Final Success Notification
+        run: echo "::notice::✅ Model ${{ env.FULL_FILE_NAME }} successfully published in release ${{ env.TAG_NAME }}"
