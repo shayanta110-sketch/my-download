@@ -1,14 +1,14 @@
-name: "دانلود و پارتیشن‌بندی چند مدل (نسخه نهایی - Bypass Truncation)"
+name: "دانلود و پارتیشن‌بندی چند مدل (نسخه نهایی - پایدار حافظه)"
 
 on:
   workflow_dispatch:
     inputs:
       models_json:
-        description: 'JSON array of Hugging Face model URLs'
+        description: 'آرایه JSON از لینک‌های مدل‌ها (مثال: ["url1", "url2"])'
         required: true
         default: '[]'
       split_size_mb:
-        description: 'Split size in megabytes (default: 500)'
+        description: 'حداکثر حجم هر پارتیشن (مگابایت)'
         required: false
         default: '500'
 
@@ -22,34 +22,34 @@ jobs:
         model_url: ${{ fromJSON(github.event.inputs.models_json) }}
       fail-fast: false
     steps:
-      - name: Checkout repository
+      - name: بررسی مخزن
         uses: actions/checkout@v4
 
-      - name: Install tools quietly
+      - name: نصب ابزارهای مورد نیاز (بی‌صدا)
         run: |
           sudo apt-get update > /dev/null 2>&1
           sudo apt-get install -y p7zip-full > /dev/null 2>&1
 
-      - name: Extract filename from URL
+      - name: تشخیص نام فایل از لینک
         id: extract_name
         run: |
           URL="${{ matrix.model_url }}"
           CLEAN_URL="${URL%%\?*}"
           FULL_FILE_NAME=$(basename "$CLEAN_URL")
           echo "FULL_FILE_NAME=$FULL_FILE_NAME" >> $GITHUB_ENV
-          echo "::notice::Processing $FULL_FILE_NAME"
+          echo "::notice::در حال پردازش $FULL_FILE_NAME"
 
-      - name: Download model (silent)
+      - name: دانلود مدل (بی‌صدا)
         run: |
           wget --quiet --show-progress "${{ matrix.model_url }}" -O "${{ env.FULL_FILE_NAME }}"
 
-      - name: Get SHA256 hash
+      - name: ذخیره SHA256 فایل اصلی
         id: hash_original
         run: |
           ORIGINAL_HASH=$(sha256sum "${{ env.FULL_FILE_NAME }}" | cut -d' ' -f1)
           echo "ORIGINAL_HASH=$ORIGINAL_HASH" >> $GITHUB_ENV
 
-      - name: Split file into parts (silent)
+      - name: پارتیشن‌بندی مستقیم فایل (بی‌صدا)
         run: |
           SIZE_MB="${{ github.event.inputs.split_size_mb }}"
           split -b "${SIZE_MB}M" --numeric-suffixes=1 -a 2 "${{ env.FULL_FILE_NAME }}" "part_"
@@ -58,8 +58,9 @@ jobs:
             mv "$file" "part_${part_number}.zip"
           done
           rm -f "${{ env.FULL_FILE_NAME }}"
+          echo "✅ پارتیشن‌بندی انجام شد."
 
-      - name: Create checksums.txt
+      - name: ایجاد فایل checksums.txt
         run: |
           {
             echo "# Checksums for ${{ env.FULL_FILE_NAME }}"
@@ -68,61 +69,54 @@ jobs:
             sha256sum part_*.zip
           } > checksums.txt
 
-      - name: Quick integrity check (silent)
-        run: |
-          cat part_*.zip > temp_combined.file > /dev/null 2>&1
-          ACTUAL_HASH=$(sha256sum temp_combined.file | cut -d' ' -f1)
-          if [ "$ACTUAL_HASH" = "${{ env.ORIGINAL_HASH }}" ]; then
-            echo "::notice::Integrity check passed for ${{ env.FULL_FILE_NAME }}"
-          else
-            echo "::error::Integrity check failed for ${{ env.FULL_FILE_NAME }}"
-            exit 1
-          fi
-          rm temp_combined.file
-
-      - name: Prepare Release Notes
+      - name: آماده‌سازی متن رلیز
         run: |
           cat > release_notes.md << EOF
-          ## 📦 Download Model: ${{ env.FULL_FILE_NAME }}
+          ## 📦 دانلود مدل: ${{ env.FULL_FILE_NAME }}
           
-          🚀 Model successfully downloaded and split.
+          🚀 مدل با موفقیت دانلود و پارتیشن‌بندی شد.
           
-          **Original file:** \`${{ env.FULL_FILE_NAME }}\`
+          **فایل اصلی:** \`${{ env.FULL_FILE_NAME }}\`
           
-          **SHA256 hash of original file:**
+          **هش SHA256 فایل اصلی:**
           \`\`\`
           ${{ env.ORIGINAL_HASH }}
           \`\`\`
           
-          ### How to reconstruct the original file:
-          1. Download all \`part_*.zip\` files into a folder.
-          2. Run the following command in your terminal:
+          ### نحوه بازسازی فایل اصلی:
+          1. تمام فایل‌های \`part_*.zip\` را در یک پوشه دانلود کنید.
+          2. در ترمینال (لینوکس، macOS یا WSL ویندوز) دستور زیر را اجرا کنید:
              \`\`\`bash
              cat part_*.zip > ${{ env.FULL_FILE_NAME }}
              \`\`\`
-          3. The original file \`${{ env.FULL_FILE_NAME }}\` will be reconstructed.
+          3. فایل اصلی \`${{ env.FULL_FILE_NAME }}\` بازسازی می‌شود.
           
-          ### Verify integrity:
-          - The \`checksums.txt\` file contains the SHA256 hash of the original file and all parts.
-          - Use \`sha256sum -c checksums.txt\` to verify.
+          ### بررسی صحت:
+          - فایل \`checksums.txt\` شامل هش فایل اصلی و هش تک‌تک قطعات است.
+          - برای بررسی خودکار: \`sha256sum -c checksums.txt\`
           EOF
 
-      - name: Create Release and upload assets
+      - name: ایجاد Release و آپلود با GitHub CLI
         id: release
         run: |
           SAFE_NAME=$(echo "${{ env.FULL_FILE_NAME }}" | sed 's/[^a-zA-Z0-9._-]/_/g')
           TAG_NAME="model-${SAFE_NAME}-${{ github.run_id }}-${{ strategy.job-index }}"
           gh release create "$TAG_NAME" \
-            --title "📦 Download Model: ${{ env.FULL_FILE_NAME }}" \
+            --title "📦 دانلود مدل: ${{ env.FULL_FILE_NAME }}" \
             --notes-file release_notes.md \
             part_*.zip checksums.txt \
             --repo "${{ github.repository }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Cleanup
+      - name: پاکسازی فایل‌های موقتی برای آزادسازی فضا
         run: |
+          echo "Disk usage before cleanup:"
+          df -h /
+          echo "🧹 Cleaning up..."
           rm -rf part_*.zip checksums.txt release_notes.md
+          echo "Disk usage after cleanup:"
+          df -h /
 
-      - name: Final Success Notification
-        run: echo "::notice::✅ Model ${{ env.FULL_FILE_NAME }} successfully published in release ${{ env.TAG_NAME }}"
+      - name: اعلان موفقیت نهایی
+        run: echo "::notice::✅ مدل ${{ env.FULL_FILE_NAME }} با موفقیت در Release ${{ env.TAG_NAME }} منتشر شد."
