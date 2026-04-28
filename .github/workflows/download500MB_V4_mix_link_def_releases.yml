@@ -1,148 +1,118 @@
-name: "دانلود و پارتیشن‌بندی چند مدل (حلقه پایدار)"
+name: دانلود و پارتیشن‌بندی چند مدل (نسخه JSON)
 
 on:
   workflow_dispatch:
     inputs:
-      models_list:
-        description: 'لیست لینک‌های مدل (هر لینک در یک خط)'
+      models_json:
+        description: 'آرایه JSON از لینک‌های مدل‌ها (مثال: ["url1", "url2", ...])'
         required: true
-        default: |
-          https://huggingface.co/lmstudio-community/UI-TARS-2B-SFT-GGUF/resolve/main/UI-TARS-2B-SFT-Q6_K.gguf?download=true
-          https://huggingface.co/mradermacher/LiteCoder-Terminal-4b-sft-i1-GGUF/resolve/main/LiteCoder-Terminal-4b-sft.i1-Q5_K_M.gguf?download=true
-          https://huggingface.co/QuantFactory/lb-reranker-0.5B-v1.0-GGUF/resolve/main/lb-reranker-0.5B-v1.0.Q8_0.gguf?download=true
-          https://huggingface.co/mradermacher/DeepSeek-R1-Distill-Llama-3B-tools-SFT-GGUF/resolve/main/DeepSeek-R1-Distill-Llama-3B-tools-SFT.Q5_K_M.gguf?download=true
-          https://huggingface.co/mradermacher/RealGuardrails-Llama3.2-3B-Instruct-SFT-DPO-GGUF/resolve/main/RealGuardrails-Llama3.2-3B-Instruct-SFT-DPO.Q6_K.gguf?download=true
-          https://huggingface.co/jdaddyalbs/qwen3_sft_playwright_gguf/resolve/main/unsloth.Q8_0.gguf?download=true
-          https://huggingface.co/mradermacher/DeepSeek-R1-Qwen2.5-1.5b-SFT-R1-JSON-Unstructured-To-Structured-GGUF/resolve/main/DeepSeek-R1-Qwen2.5-1.5b-SFT-R1-JSON-Unstructured-To-Structured.Q8_0.gguf?download=true
-          https://huggingface.co/mradermacher/Qwen3.5-0.8B-SFT-Claude-Opus-Reasoning-Unsloth-i1-GGUF/resolve/main/Qwen3.5-0.8B-SFT-Claude-Opus-Reasoning-Unsloth.i1-Q6_K.gguf?download=true
-          https://huggingface.co/GOBA-AI-Labs/GOBA-OLMoE-Expert-Tuned/resolve/main/OLMoE-code-tuned.gguf?download=true
-          https://huggingface.co/tripathyShaswata/Phi-tiny-MoE-instruct-GGUF/resolve/main/Phi-tiny-MoE-instruct-Q8_0.gguf?download=true
-          https://huggingface.co/RichardErkhov/JayHyeon_-_Qwen2.5-0.5B-SFT-2e-5-2ep-MDPO_1e-6-3ep_0alp_0lam-gguf/resolve/main/Qwen2.5-0.5B-SFT-2e-5-2ep-MDPO_1e-6-3ep_0alp_0lam.Q5_K_M.gguf?download=true
-          https://huggingface.co/LiquidAI/LFM2-8B-A1B-GGUF/resolve/main/LFM2-8B-A1B-Q4_K_M.gguf
+        default: '[]'
+      pr_numbers:
+        description: 'شماره PRها (اختیاری)'
+        required: false
+        type: string
+        default: ''
       split_size_mb:
-        description: 'حداکثر حجم هر پارتیشن (بر حسب مگابایت)'
+        description: 'حداکثر حجم هر پارتیشن (مگابایت)'
         required: false
         default: '500'
+      version_tag:
+        description: 'نسخه Tags‌ها (اختیاری)'
+        required: false
+        type: string
+        default: 'latest'
 
 jobs:
-  process-all-models:
+  validate-prs:
+    runs-on: ubuntu-latest
+    outputs:
+      resolved_pr_numbers: ${{ steps.validate.outputs.resolved_pr_numbers }}
+    steps:
+      - name: Validate PR Numbers
+        id: validate
+        run: |
+          RESOLVED_PR=""
+          if [ -n "${{ github.event.inputs.pr_numbers }}" ]; then
+            IFS=',' read -ra PR_ARR <<< "${{ github.event.inputs.pr_numbers }}"
+            echo "PRs to consider: ${PR_ARR[@]}"
+          else
+            echo "No PRs provided."
+          fi
+          echo "resolved_pr_numbers=${RESOLVED_PR}" >> $GITHUB_OUTPUT
+
+      - name: Build tag matrix
+        id: build-tag-matrix
+        run: |
+          # ... (کد ساخت ماتریکس تگ‌ها)
+
+  process-models:
+    needs: [validate-prs]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    strategy:
+      matrix:
+        model_url: ${{ fromJSON(github.event.inputs.models_json) }}
+      fail-fast: false
     steps:
       - name: بررسی مخزن
         uses: actions/checkout@v4
 
       - name: نصب ابزارهای مورد نیاز
-        run: sudo apt-get update && sudo apt-get install -y p7zip-full jq
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
 
-      - name: پردازش لیست مدل‌ها به صورت حلقه
+      - name: تشخیص نام فایل از لینک
+        id: extract_name
         run: |
-          # ذخیره لیست در یک فایل موقت
-          cat > models.txt << 'EOF'
-          ${{ github.event.inputs.models_list }}
-          EOF
+          URL="${{ matrix.model_url }}"
+          CLEAN_URL="${URL%%\?*}"
+          FULL_FILE_NAME=$(basename "$CLEAN_URL")
+          echo "FULL_FILE_NAME=$FULL_FILE_NAME" >> $GITHUB_ENV
 
-          # شمارنده برای ساخت Tagهای یکتا (اختیاری)
-          COUNTER=1
+      - name: دانلود مدل
+        run: |
+          wget --progress=bar:force "${{ matrix.model_url }}" -O "${{ env.FULL_FILE_NAME }}"
 
-          # خواندن خط به خط (حذف خطوط خالی)
-          while IFS= read -r URL || [ -n "$URL" ]; do
-            # حذف فضاهای خالی ابتدا و انتها
-            URL=$(echo "$URL" | xargs)
-            # اگر خط خالی بود، رد کن
-            [ -z "$URL" ] && continue
-            
-            echo "============================================="
-            echo "📥 شروع پردازش مدل شماره $COUNTER: $URL"
-            echo "============================================="
+      - name: ذخیره SHA256 فایل اصلی (قبل از پارتیشن‌بندی)
+        id: hash_original
+        run: |
+          ORIGINAL_HASH=$(sha256sum "${{ env.FULL_FILE_NAME }}" | cut -d' ' -f1)
+          echo "ORIGINAL_HASH=$ORIGINAL_HASH" >> $GITHUB_ENV
 
-            # -------- 1. استخراج نام فایل ----------
-            CLEAN_URL="${URL%%\?*}"
-            FULL_FILE_NAME=$(basename "$CLEAN_URL")
-            echo "نام فایل: $FULL_FILE_NAME"
+      - name: پارتیشن‌بندی مستقیم فایل
+        run: |
+          SIZE_MB="${{ github.event.inputs.split_size_mb }}"
+          split -b "${SIZE_MB}M" --numeric-suffixes=1 -a 2 "${{ env.FULL_FILE_NAME }}" "part_"
+          for file in part_*; do
+            part_number=${file#part_}
+            mv "$file" "part_${part_number}.zip"
+          done
+          rm -f "${{ env.FULL_FILE_NAME }}"
+          echo "✅ پارتیشن‌بندی انجام شد."
 
-            # -------- 2. دانلود مدل ----------
-            echo "در حال دانلود..."
-            wget --progress=bar:force "$URL" -O "$FULL_FILE_NAME"
+      - name: ایجاد فایل checksums.txt استاندارد
+        run: |
+          echo "# Checksums for ${{ env.FULL_FILE_NAME }}" > checksums.txt
+          echo "" >> checksums.txt
+          echo "${{ env.ORIGINAL_HASH }}  ${{ env.FULL_FILE_NAME }}" >> checksums.txt
+          sha256sum part_*.zip >> checksums.txt
 
-            # -------- 3. ذخیره SHA256 ----------
-            ORIGINAL_HASH=$(sha256sum "$FULL_FILE_NAME" | cut -d' ' -f1)
-            echo "هش فایل اصلی: $ORIGINAL_HASH"
+      - name: اعتبارسنجی سریع قطعات
+        run: |
+          cat part_*.zip > temp_combined.file
+          ACTUAL_HASH=$(sha256sum temp_combined.file | cut -d' ' -f1)
+          if [ "$ACTUAL_HASH" = "${{ env.ORIGINAL_HASH }}" ]; then
+            echo "✅ اعتبارسنجی موفق"
+          else
+            echo "❌ خطا: هش قطعات با فایل اصلی مطابقت ندارد!"
+            exit 1
+          fi
+          rm temp_combined.file
 
-            # -------- 4. پارتیشن‌بندی ----------
-            SIZE_MB="${{ github.event.inputs.split_size_mb }}"
-            split -b "${SIZE_MB}M" --numeric-suffixes=1 -a 2 "$FULL_FILE_NAME" "part_"
-            for file in part_*; do
-              part_number=${file#part_}
-              mv "$file" "part_${part_number}.zip"
-            done
-            rm -f "$FULL_FILE_NAME"
-            echo "✅ پارتیشن‌بندی انجام شد."
-
-            # -------- 5. ایجاد checksums.txt ----------
-            echo "# Checksums for $FULL_FILE_NAME" > checksums.txt
-            echo "" >> checksums.txt
-            echo "$ORIGINAL_HASH  $FULL_FILE_NAME" >> checksums.txt
-            sha256sum part_*.zip >> checksums.txt
-            cat checksums.txt
-
-            # -------- 6. اعتبارسنجی سریع ----------
-            cat part_*.zip > temp_combined.file
-            ACTUAL_HASH=$(sha256sum temp_combined.file | cut -d' ' -f1)
-            if [ "$ACTUAL_HASH" = "$ORIGINAL_HASH" ]; then
-              echo "✅ اعتبارسنجی موفق"
-            else
-              echo "❌ خطا: هش قطعات با فایل اصلی مطابقت ندارد!"
-              exit 1
-            fi
-            rm temp_combined.file
-
-            # -------- 7. آماده‌سازی متن Release ----------
-            cat > release_notes.md << RELEASE_EOF
-          ## 📦 دانلود مدل $FULL_FILE_NAME
-          
+      - name: آماده‌سازی متن رلیز
+        run: |
+          cat > release_notes.md << 'EOF'
+          ## 📦 دانلود مدل [MODEL_NAME]
           🚀 مدل با موفقیت دانلود و پارتیشن‌بندی شد.
-          
-          **فایل اصلی:** \`$FULL_FILE_NAME\`
-          
+          **فایل اصلی:** `[MODEL_NAME]`
           **هش SHA256 فایل اصلی:**
-          \`\`\`
-          $ORIGINAL_HASH
-          \`\`\`
-          
-          ### نحوه بازسازی فایل اصلی:
-          1. تمام فایل‌های \`part_*.zip\` را در یک پوشه دانلود کنید.
-          2. در ترمینال (لینوکس، macOS یا WSL ویندوز) دستور زیر را اجرا کنید:
-             \`\`\`bash
-             cat part_*.zip > $FULL_FILE_NAME
-             \`\`\`
-          3. فایل اصلی \`$FULL_FILE_NAME\` بازسازی می‌شود.
-          
-          ### بررسی صحت:
-          - فایل \`checksums.txt\` شامل هش فایل اصلی و هش تک‌تک قطعات است.
-          - برای بررسی خودکار: \`sha256sum -c checksums.txt\`
-          RELEASE_EOF
-
-            # -------- 8. ساخت Tag و Release ----------
-            SAFE_NAME=$(echo "$FULL_FILE_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g')
-            TAG_NAME="model-${SAFE_NAME}-${{ github.run_id }}-${COUNTER}"
-            echo "Tag: $TAG_NAME"
-
-            gh release create "$TAG_NAME" \
-              --title "📦 دانلود مدل $FULL_FILE_NAME" \
-              --notes-file release_notes.md \
-              part_*.zip checksums.txt
-
-            echo "✅ مدل $FULL_FILE_NAME با موفقیت در Release $TAG_NAME منتشر شد."
-
-            # -------- 9. پاکسازی فایل‌های موقتی برای آزادسازی فضا ----------
-            rm -f part_*.zip checksums.txt release_notes.md
-            echo "---------------------------------------------"
-
-            COUNTER=$((COUNTER + 1))
-          done < models.txt
-
-          echo "🎉 همه مدل‌ها با موفقیت پردازش شدند."
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
