@@ -1,4 +1,4 @@
-name: "دانلود و پارتیشن‌بندی چند مدل (پشت سر هم)"
+name: "دانلود و پارتیشن‌بندی چند مدل (پشت سر هم - نسخه پایدار)"
 
 on:
   workflow_dispatch:
@@ -25,13 +25,32 @@ on:
         default: '500'
 
 jobs:
+  # Job مخصوص تبدیل لیست به آرایه JSON
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: تبدیل لیست ورودی به JSON array
+        id: set-matrix
+        run: |
+          # دریافت لیست ورودی (هر خط یک لینک)
+          MODELS_LIST="${{ github.event.inputs.models_list }}"
+          # تبدیل خطوط به آرایه JSON
+          # حذف خطوط خالی و کوتاه کردن فضاهای خالی
+          JSON_ARRAY=$(echo "$MODELS_LIST" | grep -v '^\s*$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -R . | jq -s .)
+          echo "matrix=$JSON_ARRAY" >> $GITHUB_OUTPUT
+          echo "آرایه ایجاد شده: $JSON_ARRAY"
+
+  # پردازش هر مدل به صورت مستقل
   process-models:
+    needs: [prepare-matrix]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     strategy:
       matrix:
-        model_url: ${{ fromJSON(format('[{0}]', join(github.event.inputs.models_list, ','))) }}
+        model_url: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
       fail-fast: false
     steps:
       - name: بررسی مخزن
@@ -44,7 +63,6 @@ jobs:
         id: extract_name
         run: |
           URL="${{ matrix.model_url }}"
-          # حذف پارامترهای query string (?download=true)
           CLEAN_URL="${URL%%\?*}"
           FULL_FILE_NAME=$(basename "$CLEAN_URL")
           echo "FULL_FILE_NAME=$FULL_FILE_NAME" >> $GITHUB_ENV
@@ -120,15 +138,9 @@ jobs:
           - برای بررسی خودکار: \`sha256sum -c checksums.txt\`
           EOF
 
-      - name: حذف فایل‌های قدیمی در صورت وجود (اختیاری)
-        run: |
-          # اطمینان از پاکسازی هر گونه asset قدیمی با نام مشابه
-          echo "پیش‌نیازها آماده است."
-
       - name: ایجاد Release و آپلود با GitHub CLI
         id: release
         run: |
-          # ساخت Tag یکتا برای این مدل (بر اساس نام فایل و زمان)
           SAFE_NAME=$(echo "${{ env.FULL_FILE_NAME }}" | sed 's/[^a-zA-Z0-9._-]/_/g')
           TAG_NAME="model-${SAFE_NAME}-${{ github.run_id }}-${{ github.run_number }}"
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
